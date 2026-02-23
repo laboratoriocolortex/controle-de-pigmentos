@@ -8,13 +8,19 @@ st.set_page_config(page_title="Gestão de Pigmentos", layout="wide", page_icon="
 # 1. FUNÇÃO DE CARREGAMENTO (Ajustada para a sua estrutura real)
 def load_data():
     file_path = "Aba_Mestra.csv"
-    # Estrutura: Tipo - Cor - Pigmento - Quantidade Planejada
     if os.path.exists(file_path):
-        return pd.read_csv(file_path)
-    else:
-        df = pd.DataFrame(columns=["Tipo", "Cor", "Pigmento", "Quantidade Planejada"])
-        df.to_csv(file_path, index=False)
+        # Tenta ler com utf-8, se falhar tenta latin-1
+        try:
+            df = pd.read_csv(file_path, sep=None, engine='python', encoding='utf-8')
+        except UnicodeDecodeError:
+            df = pd.read_csv(file_path, sep=None, engine='python', encoding='latin-1')
+        
+        # Limpa espaços extras nos nomes das colunas
+        df.columns = df.columns.str.strip()
         return df
+    else:
+        st.error("Arquivo Aba_Mestra.csv não encontrado!")
+        return pd.DataFrame()
 
 df_mestra = load_data()
 
@@ -75,3 +81,4 @@ if aba == "🚀 Produção":
 elif aba == "📊 Ver Aba Mestra":
     st.title("📊 Base de Dados - Aba Mestra")
     st.dataframe(df_mestra, use_container_width=True)
+
