@@ -1,74 +1,95 @@
 import streamlit as st
-import google.generativeai as genai
-from PIL import Image
 import pandas as pd
-import io
+import os
 
-# Configurações da página
-st.set_page_config(page_title="Extrator Logístico de Tintas", layout="wide")
+# Configuração da página
+st.set_page_config(page_title="Gestão de Pigmentos", layout="wide", page_icon="🧪")
 
-st.title("🎨 Extrator de Diários de Produção")
-st.markdown("Transforme fotos de etiquetas e cadernos em dados estruturados instantaneamente.")
+# Função para carregar dados
+def load_data():
+    file_path = "Aba_Mestra.csv"
+    if os.path.exists(file_path):
+        return pd.read_csv(file_path)
+    else:
+        # Cria um modelo se o arquivo não existir
+        df = pd.DataFrame(columns=["Produto", "Cor", "Cod", "Amarelo", "Azul", "Preto", "Vermelho"])
+        df.to_csv(file_path, index=False)
+        return df
 
-# Barra lateral para configuração
-with st.sidebar:
-    st.header("Configuração")
-    api_key = st.text_input("Insira sua Gemini API Key:", type="password")
-    st.info("Obtenha sua chave em: https://aistudio.google.com/app/apikey")
+df_mestra = load_data()
 
-# O Prompt mestre que definimos
-SYSTEM_PROMPT = """
-Você é um especialista em OCR e estruturação de dados para logística química. 
-Sua função é processar imagens de etiquetas e diários de produção.
+# Menu lateral para navegação
+st.sidebar.title("Navegação")
+aba = st.sidebar.radio("Ir para:", ["🚀 Produção", "➕ Cadastrar Nova Cor"])
 
-REGRAS DE CLASSIFICAÇÃO:
-1. FAMÍLIA: Identifique pelo nome (Massa, Esmalte, Textura, Selador, Piso, Latéx, Pasta, Efeito).
-2. TIPO DE COR:
-   - NÃO SE APLICA: Massas, Seladores, Fundos, Texturas Rústicas, Pastas Base.
-   - COLORIDO: Cores nomes (Azul, etc) ou "BRANCO GELO".
-   - BRANCO: Branco Total, Neve, Base ou apenas Branco (exceto Gelo).
+# --- ABA 1: PRODUÇÃO ---
+if aba == "🚀 Produção":
+    st.title("🚀 Ordem de Produção")
+    
+    if df_mestra.empty:
+        st.warning("A base de dados está vazia. Cadastre uma cor primeiro.")
+    else:
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            prod_sel = st.selectbox("Selecione o Produto", df_mestra['Produto'].unique())
+        with col2:
+            cores_disp = df_mestra[df_mestra['Produto'] == prod_sel]['Cor'].unique()
+            cor_sel = st.selectbox("Selecione a Cor", cores_disp)
+        with col3:
+            qtd = st.number_input("Quantidade (Litros/Kg)", min_value=0.0, step=1.0)
 
-DIRETRIZES DE LIMPEZA:
-- LOTE: Padrão XXXXX/XXXX.
-- HORÁRIOS: Sempre que houver dois horários (ex: 21:30 e 21:33), concatene como "HH:MM - HH:MM". Ignore textos como "análise FQ".
-- TÉCNICO: O primeiro valor numérico manual é pH, o segundo é Densidade.
+        if qtd > 0:
+            linha = df_mestra[(df_mestra['Produto'] == prod_sel) & (df_mestra['Cor'] == cor_sel)]
+            pigm_cols = df_mestra.columns[3:] # Assume que pigmentos começam na 4ª coluna
+            
+            st.markdown("### 📋 Receita Calculada")
+            
+            # Exibição em Cards
+            metric_cols = st.columns(len(pigm_cols))
+            resumo_lista = []
+            
+            for i, p in enumerate(pigm_cols):
+                valor_total = linha[p].values[0] * qtd
+                if valor_total > 0:
+                    with metric_cols[i % len(metric_cols)]:
+                        st.metric(label=p, value=f"{valor_total:.3f}")
+                    resumo_lista.append({"Pigmento": p, "Qtd Total": valor_total})
+            
+            if resumo_lista:
+                st.dataframe(pd.DataFrame(resumo_lista), use_container_width=True)
+                csv = pd.DataFrame(resumo_lista).to_csv(index=False).encode('utf-8')
+                st.download_button("📥 Baixar Ordem de Produção", csv, "ordem.csv", "text/csv")
 
-SAÍDA: Forneça EXCLUSIVAMENTE uma tabela em Markdown e o bloco de código CSV separado por ponto e vírgula (;).
-"""
+# --- ABA 2: CADASTRO ---
+elif aba == "➕ Cadastrar Nova Cor":
+    st.title("➕ Cadastrar Nova Formulação")
+    
+    with st.form("form_cadastro"):
+        new_prod = st.text_input("Nome do Produto (ex: Esmalte Extra Rápido)")
+        new_cor = st.text_input("Nome da Cor (ex: Azul Del Rey)")
+        new_cod = st.text_input("Código (opcional)")
+        
+        st.markdown("*Gramaturas por unidade (1 Litro/Kg):*")
+        pigm_inputs = {}
+        # Pega as colunas de pigmentos existentes
+        col_inputs = st.columns(3)
+        for i, p in enumerate(df_mestra.columns[3:]):
+            with col_inputs[i % 3]:
+                pigm_inputs[p] = st.number_input(f"Qtd {p}", min_value=0.0, format="%.4f")
+        
+        btn_salvar = st.form_submit_button("Salvar na Base")
 
-# Interface de Upload
-col1, col2 = st.columns([1, 1])
-
-with col1:
-    uploaded_file = st.file_uploader("Arraste a foto do diário aqui", type=["jpg", "jpeg", "png"])
-    if uploaded_file:
-        image = Image.open(uploaded_file)
-        st.image(image, caption="Imagem Carregada", use_container_width=True)
-
-with col2:
-    if uploaded_file and api_key:
-        if st.button("🚀 Processar e Gerar Planilha"):
-            try:
-                genai.configure(api_key=api_key)
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                
-                with st.spinner("Analisando imagem..."):
-                    response = model.generate_content([SYSTEM_PROMPT, image])
-                    
-                    # Exibe o resultado de texto
-                    st.markdown("### Resultado da Extração")
-                    st.markdown(response.text)
-                    
-                    # Lógica simples para extrair o CSV da resposta e permitir download
-                    if "Familia;" in response.text:
-                        csv_data = response.text.split("csv")[-1].split("")[0].strip()
-                        st.download_button(
-                            label="📥 Baixar Planilha (CSV)",
-                            data=csv_data,
-                            file_name="producao_extraida.csv",
-                            mime="text/csv"
-                        )
-            except Exception as e:
-                st.error(f"Erro ao processar: {e}")
-    elif not api_key:
-        st.warning("Por favor, insira sua API Key na barra lateral para começar.")
+    if btn_salvar:
+        if new_prod and new_cor:
+            # Cria nova linha
+            nova_linha = {"Produto": new_prod, "Cor": new_cor, "Cod": new_cod}
+            nova_linha.update(pigm_inputs)
+            
+            # Adiciona ao DataFrame e salva
+            new_df = pd.concat([df_mestra, pd.DataFrame([nova_linha])], ignore_index=True)
+            new_df.to_csv("Aba_Mestra.csv", index=False)
+            st.success(f"Cor '{new_cor}' cadastrada com sucesso!")
+            st.balloons()
+        else:
+            st.error("Por favor, preencha o Produto e a Cor.")
