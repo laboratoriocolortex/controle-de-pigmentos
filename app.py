@@ -1,4 +1,4 @@
-[11:19, 24/02/2026] Ernando: import streamlit as st
+import streamlit as st
 import pandas as pd
 import os
 from datetime import datetime
@@ -194,3 +194,4 @@ elif aba == "➕ Cadastro":
 elif aba == "📊 Aba Mestra":
     st.title("📊 Dados da Aba Mestra")
     st.dataframe(df_mestra)
+
