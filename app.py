@@ -27,11 +27,17 @@ def load_data():
 def salvar_no_historico(dados_lista):
     hist_path = "Historico_Producao.csv"
     novo_df = pd.DataFrame(dados_lista)
-    colunas_excel = ["data", "lote", "tipo de produto", "cor", "pigmento", "toque", "Quant ad (g)", "#Plan", "#Real", "Litros/Unit", "Volume Planejado", "Volume Produzido", "Encomenda?"]
+    
+    # Ordem das colunas com Quant OP (kg)
+    colunas_excel = [
+        "data", "lote", "tipo de produto", "cor", "pigmento", "toque", 
+        "Quant OP (kg)", "Quant ad (g)", "#Plan", "#Real", 
+        "Litros/Unit", "Volume Planejado", "Volume Produzido", "Encomenda?"
+    ]
     
     if os.path.exists(hist_path):
         hist_existente = pd.read_csv(hist_path, encoding='latin-1', sep=';')
-        for col in ["Quant ad (g)", "Volume Planejado", "Volume Produzido"]:
+        for col in ["Quant OP (kg)", "Quant ad (g)", "Volume Planejado", "Volume Produzido"]:
             if col in hist_existente.columns:
                 hist_existente[col] = hist_existente[col].astype(str).str.replace(',', '.')
                 hist_existente[col] = pd.to_numeric(hist_existente[col], errors='coerce')
@@ -43,8 +49,8 @@ def salvar_no_historico(dados_lista):
 
 def formatar_para_excel(df):
     df_excel = df.copy()
-    colunas_numericas = df_excel.select_dtypes(include=['float64', 'float32', 'int64']).columns
-    for col in colunas_numericas:
+    col_nums = df_excel.select_dtypes(include=['float64', 'float32', 'int64']).columns
+    for col in col_nums:
         if col not in ["#Plan", "#Real", "toque"]:
             df_excel[col] = df_excel[col].apply(lambda x: f"{x:.8f}".replace('.', ','))
     return df_excel
@@ -61,7 +67,6 @@ if aba == "🚀 Nova Pigmentação":
     if df_mestra.empty:
         st.warning("Aba Mestra não carregada.")
     else:
-        # 1. Identificação Geral
         c1, c2, c3 = st.columns(3)
         with c1:
             tipo_sel = st.selectbox("Produto", df_mestra['Tipo'].unique())
@@ -74,34 +79,27 @@ if aba == "🚀 Nova Pigmentação":
 
         st.markdown("---")
         
-        # 2. Configuração Compacta de Unidades e Litragem
         col_unid, col_litros = st.columns([1, 3])
-        
         with col_unid:
             st.write("*📦 Unidades*")
             num_plan = st.number_input("#Plan", min_value=1, value=1, step=1)
             num_real = st.number_input("#Real", min_value=1, value=num_plan, step=1)
-
         with col_litros:
             st.write("*🧪 Litragem / Embalagem*")
-            # Lista compacta de opções
             opcoes_vol = ["0,9L", "3L", "3,6L", "13kg", "15L", "18L", "25kg", "Outro"]
             selecao_vol = st.select_slider("Selecione o Volume Unitário:", options=opcoes_vol, value="15L")
-            
             if selecao_vol == "Outro":
                 litros_unit = st.number_input("Valor (L/kg):", min_value=0.01, value=1.0, format="%.2f")
             else:
                 litros_unit = float(selecao_vol.replace('L', '').replace('kg', '').replace(',', '.'))
         
         st.markdown("---")
-        
-        # Cálculos de Volume Total
-        vol_planejado_total = num_plan * litros_unit
-        vol_produzido_total = num_real * litros_unit
+        vol_plan_tot = num_plan * litros_unit
+        vol_prod_tot = num_real * litros_unit
         
         v1, v2 = st.columns(2)
-        v1.metric("Volume Planejado Total", f"{vol_planejado_total:.2f} L/kg")
-        v2.metric("Volume Produzido Total", f"{vol_produzido_total:.2f} L/kg")
+        v1.metric("Volume Planejado Total", f"{vol_plan_tot:.2f} L/kg")
+        v2.metric("Volume Produzido Total", f"{vol_prod_tot:.2f} L/kg")
 
         formulas = df_mestra[(df_mestra['Tipo'] == tipo_sel) & (df_mestra['Cor'] == cor_sel)]
         
@@ -112,8 +110,8 @@ if aba == "🚀 Nova Pigmentação":
                 
                 for index, row in formulas.iterrows():
                     pigm = row['Pigmento']
-                    dosagem_base = row["Quant OP (kg)"]
-                    rec_kg = dosagem_base * vol_planejado_total
+                    base_kg = row["Quant OP (kg)"]
+                    rec_kg = base_kg * vol_plan_tot
                     rec_g = rec_kg * 1000
                     
                     st.markdown(f"#### 🧪 {pigm}")
@@ -125,9 +123,9 @@ if aba == "🚀 Nova Pigmentação":
                     with c_tq:
                         tq = st.number_input(f"Toques", min_value=0, step=1, key=f"tq_{index}")
                     with c_ad:
-                        q_ad = st.number_input(f"Quant ad (g)", value=float(rec_g), format="%.2f", key=f"ad_{index}")
+                        q_ad = st.number_input(f"Quant ad (g) Real", value=float(rec_g), format="%.2f", key=f"ad_{index}")
                     with c_re:
-                        p_real = st.number_input(f"Peso Real (kg)", value=float(rec_kg), format="%.8f", key=f"re_{index}")
+                        p_real = st.number_input(f"Peso Real (kg) Balança", value=float(rec_kg), format="%.8f", key=f"re_{index}")
 
                     lista_lote.append({
                         "data": datetime.now().strftime("%d/%m/%Y"),
@@ -136,12 +134,13 @@ if aba == "🚀 Nova Pigmentação":
                         "cor": cor_sel,
                         "pigmento": pigm,
                         "toque": tq,
+                        "Quant OP (kg)": rec_kg, # Atualizado para KG
                         "Quant ad (g)": q_ad,
                         "#Plan": num_plan,
                         "#Real": num_real,
                         "Litros/Unit": litros_unit,
-                        "Volume Planejado": vol_planejado_total,
-                        "Volume Produzido": vol_produzido_total,
+                        "Volume Planejado": vol_plan_tot,
+                        "Volume Produzido": vol_prod_tot,
                         "Encomenda?": encomenda
                     })
                 
@@ -149,10 +148,8 @@ if aba == "🚀 Nova Pigmentação":
                     salvar_no_historico(lista_lote)
                     st.success("Registro salvo no histórico!")
                     st.balloons()
-        else:
-            st.error("Fórmula não encontrada.")
 
-# --- OUTRAS ABAS ---
+# ... (abas Banco de Dados, Cadastro e Aba Mestra permanecem iguais)
 elif aba == "📜 Banco de Dados":
     st.title("📜 Histórico")
     hist_path = "Historico_Producao.csv"
@@ -162,6 +159,8 @@ elif aba == "📜 Banco de Dados":
         df_excel = formatar_para_excel(df_hist)
         csv_ready = df_excel.to_csv(index=False, sep=';', encoding='latin-1').encode('latin-1')
         st.download_button("📥 Baixar Base para Excel", csv_ready, "Controle_2026.csv", "text/csv")
+    else:
+        st.info("O banco de dados está vazio.")
 
 elif aba == "➕ Cadastro":
     st.title("➕ Novo Pigmento")
