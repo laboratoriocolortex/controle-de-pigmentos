@@ -8,14 +8,23 @@ def load_data():
     file_path = "Aba_Mestra.csv"
     if os.path.exists(file_path):
         try:
+            # Tenta ler com diferentes encodings
             try:
                 df = pd.read_csv(file_path, sep=None, engine='python', encoding='utf-8')
-            except UnicodeDecodeError:
+            except:
                 df = pd.read_csv(file_path, sep=None, engine='python', encoding='latin-1')
+            
+            # Limpa espaços nos nomes das colunas
             df.columns = [str(c).strip() for c in df.columns]
+            
+            # Converte a coluna Quant OP para numérico, tratando vírgulas e erros
+            if "Quant OP (kg)" in df.columns:
+                df["Quant OP (kg)"] = df["Quant OP (kg)"].astype(str).str.replace(',', '.')
+                df["Quant OP (kg)"] = pd.to_numeric(df["Quant OP (kg)"], errors='coerce').fillna(0.0)
+            
             return df
         except Exception as e:
-            st.error(f"Erro ao ler o CSV: {e}")
+            st.error(f"Erro ao carregar banco de dados: {e}")
             return pd.DataFrame()
     return pd.DataFrame()
 
@@ -29,7 +38,7 @@ if aba == "🚀 Ordem de Produção":
     st.title("🚀 Planejamento de Carga")
     
     if df_mestra.empty:
-        st.warning("Base de dados 'Aba_Mestra.csv' vazia ou não encontrada.")
+        st.warning("Base de dados vazia ou inacessível.")
     else:
         c1, c2 = st.columns(2)
         with c1:
@@ -55,11 +64,10 @@ if aba == "🚀 Ordem de Produção":
             st.subheader("🎨 Formulação Calculada")
             with st.form("registro_producao"):
                 lista_resultados = []
-                col_qtd_base = "Quant OP (kg)"
                 
                 for index, row in formulas.iterrows():
                     pigmento = row['Pigmento']
-                    base_1kg = float(row[col_qtd_base])
+                    base_1kg = row["Quant OP (kg)"] # Já convertido em número no load_data
                     sugerido_total = base_1kg * total_lote
                     
                     st.markdown(f"*Pigmento: {pigmento}*")
@@ -67,53 +75,41 @@ if aba == "🚀 Ordem de Produção":
                     with col_p1:
                         st.info(f"Sugerido: {sugerido_total:.8f}")
                     with col_p2:
-                        real = st.number_input(f"Real Pesado ({pigmento})", key=f"real_{index}", value=sugerido_total, format="%.8f")
+                        real = st.number_input(f"Real Pesado ({pigmento})", key=f"real_{index}", value=float(sugerido_total), format="%.8f")
                     
                     lista_resultados.append({"Pigmento": pigmento, "Sugerido": sugerido_total, "Real": real})
                 
-                st.form_submit_button("✅ Finalizar Registro")
+                if st.form_submit_button("✅ Finalizar Registro"):
+                    st.success("Produção Processada!")
+                    st.table(pd.DataFrame(lista_resultados))
+        else:
+            st.error("Fórmula não encontrada.")
 
-# --- ABA 2: CADASTRO DE NOVAS CORES ---
+# --- ABA 2: CADASTRO ---
 elif aba == "➕ Cadastrar Nova Cor":
-    st.title("➕ Cadastrar Novo Pigmento na Fórmula")
-    st.markdown("Use esta seção para adicionar pigmentos às cores. Se uma cor leva 3 pigmentos, cadastre os 3 separadamente para o mesmo Produto/Cor.")
-    
+    st.title("➕ Cadastrar Novo Pigmento")
     with st.form("form_cadastro"):
         c1, c2 = st.columns(2)
         with c1:
-            novo_tipo = st.text_input("Tipo (Nome do Produto)", placeholder="Ex: Esmalte Sintético")
+            novo_tipo = st.text_input("Tipo (Produto)")
         with c2:
-            nova_cor = st.text_input("Cor", placeholder="Ex: Azul Naval")
+            nova_cor = st.text_input("Cor")
         
         c3, c4 = st.columns(2)
         with c3:
-            novo_pigm = st.selectbox("Pigmento", ["Amarelo Limpo", "Amarelo Óxido", "Vermelho Limpo", "Vermelho Óxido", "Azul", "Preto", "Branco", "Verde", "Outro"])
-            if novo_pigm == "Outro":
-                novo_pigm = st.text_input("Especifique o Pigmento")
+            novo_pigm = st.text_input("Pigmento (ex: Azul Limpo)")
         with c4:
-            nova_quant_op = st.number_input("Quant OP (kg) - Dosagem para 1L/1kg", format="%.8f", step=0.00000001)
+            nova_quant = st.number_input("Quant OP (kg) para 1 Litro", format="%.8f", step=0.00000001)
         
-        btn_salvar = st.form_submit_button("💾 Salvar Pigmento na Fórmula")
-        
-    if btn_salvar:
-        if novo_tipo and nova_cor and novo_pigm:
-            nova_linha = {
-                "Tipo": novo_tipo.strip(),
-                "Cor": nova_cor.strip(),
-                "Pigmento": novo_pigm,
-                "Quant OP (kg)": nova_quant_op
-            }
-            
-            # Adiciona ao dataframe atual e salva no CSV
-            df_mestra = pd.concat([df_mestra, pd.DataFrame([nova_linha])], ignore_index=True)
-            df_mestra.to_csv("Aba_Mestra.csv", index=False, encoding='utf-8')
-            
-            st.success(f"Pigmento {novo_pigm} adicionado à cor {nova_cor} com sucesso!")
-            st.balloons()
-        else:
-            st.error("Por favor, preencha todos os campos.")
+        if st.form_submit_button("Salvar"):
+            if novo_tipo and nova_cor and novo_pigm:
+                nova_linha = pd.DataFrame([{"Tipo": novo_tipo, "Cor": nova_cor, "Pigmento": novo_pigm, "Quant OP (kg)": nova_quant}])
+                df_mestra = pd.concat([df_mestra, nova_linha], ignore_index=True)
+                df_mestra.to_csv("Aba_Mestra.csv", index=False)
+                st.success("Salvo!")
+                st.rerun()
 
-# --- ABA 3: VISUALIZAÇÃO ---
+# --- ABA 3: VER MESTRA ---
 elif aba == "📊 Ver Aba Mestra":
-    st.title("📊 Consulta Aba Mestra")
-    st.dataframe(df_mestra, use_container_width=True)
+    st.title("📊 Base de Dados")
+    st.dataframe(df_mestra)
