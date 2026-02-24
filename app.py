@@ -18,9 +18,7 @@ def load_data():
             df.columns = [str(c).strip() for c in df.columns]
             
             if "Quant OP (kg)" in df.columns:
-                # Remove vírgulas por pontos para o Python entender como número
                 df["Quant OP (kg)"] = df["Quant OP (kg)"].astype(str).str.replace(',', '.')
-                # Converte para numérico e remove erros
                 df["Quant OP (kg)"] = pd.to_numeric(df["Quant OP (kg)"], errors='coerce').fillna(0.0)
             
             return df
@@ -32,18 +30,14 @@ def load_data():
 def salvar_no_historico(dados_lista):
     hist_path = "Historico_Producao.csv"
     novo_df = pd.DataFrame(dados_lista)
-    
-    # Colunas exatamente como na sua planilha de controle
     colunas_excel = ["data", "lote", "tipo de produto", "cor", "pigmento", "toque", "Quant ad (g)", "#Plan", "#Real", "Litros/Unit", "Volume Planejado", "Volume Produzido", "Encomenda?"]
     
     if os.path.exists(hist_path):
         hist_existente = pd.read_csv(hist_path, encoding='latin-1', sep=';')
-        # Limpa vírgulas lidas anteriormente para não dar erro no cálculo
         for col in ["Quant ad (g)", "Volume Planejado", "Volume Produzido"]:
             if col in hist_existente.columns:
                 hist_existente[col] = hist_existente[col].astype(str).str.replace(',', '.')
                 hist_existente[col] = pd.to_numeric(hist_existente[col], errors='coerce')
-        
         hist_final = pd.concat([hist_existente, novo_df[colunas_excel]], ignore_index=True)
     else:
         hist_final = novo_df[colunas_excel]
@@ -51,7 +45,6 @@ def salvar_no_historico(dados_lista):
     hist_final.to_csv(hist_path, index=False, sep=';', encoding='latin-1')
 
 def formatar_para_excel(df):
-    """Transforma pontos em vírgulas para o Excel reconhecer como número"""
     df_excel = df.copy()
     colunas_numericas = df_excel.select_dtypes(include=['float64', 'float32', 'int64']).columns
     for col in colunas_numericas:
@@ -71,7 +64,7 @@ if aba == "🚀 Nova Pigmentação":
     if df_mestra.empty:
         st.warning("Aba Mestra não carregada.")
     else:
-        # Topo: Definições da Ordem
+        # Cabeçalho da Ordem
         c1, c2, c3 = st.columns(3)
         with c1:
             tipo_sel = st.selectbox("Produto", df_mestra['Tipo'].unique())
@@ -95,30 +88,33 @@ if aba == "🚀 Nova Pigmentação":
         
         if not formulas.empty:
             with st.form("form_pigm"):
-                st.subheader("🎨 Dosagem Recomendada")
+                st.subheader("🎨 Composição da Cor")
                 lista_lote = []
                 
+                # Exibe cada pigmento em uma linha horizontal com colunas
                 for index, row in formulas.iterrows():
                     pigm = row['Pigmento']
-                    dosagem_base = row["Quant OP (kg)"] # valor por 1L ou 1kg
+                    dosagem_base = row["Quant OP (kg)"]
                     
-                    # Cálculo da recomendação baseado no volume do lote
                     recomendado_kg = dosagem_base * vol_planejado
                     recomendado_g = recomendado_kg * 1000
                     
-                    st.markdown(f"---")
-                    st.markdown(f"### 🧪 {pigm}")
+                    st.markdown(f"#### 🧪 {pigm}")
+                    # Criamos 4 colunas: Recomendação (Visual), Toque, Adicionado(g), Real(kg)
+                    col_info, col_tq, col_ad, col_re = st.columns([1.5, 1, 1, 1])
                     
-                    # QUADRO DE RECOMENDAÇÃO EM DESTAQUE
-                    st.warning(f"Sugerido: *{recomendado_kg:.8f} kg* |  (*{recomendado_g:.2f} g*)")
+                    with col_info:
+                        st.caption("📍 Recomendado")
+                        st.code(f"{recomendado_kg:.4f} kg / {recomendado_g:.2f} g")
                     
-                    col_a, col_b, col_c = st.columns(3)
-                    with col_a:
+                    with col_tq:
                         tq = st.number_input(f"Toques", min_value=0, step=1, key=f"tq_{index}")
-                    with col_b:
-                        q_ad = st.number_input(f"Quant ad (g) Real", value=float(recomendado_g), format="%.2f", key=f"ad_{index}")
-                    with col_c:
-                        p_real = st.number_input(f"Peso Real (kg) Balança", value=float(recomendado_kg), format="%.8f", key=f"re_{index}")
+                    
+                    with col_ad:
+                        q_ad = st.number_input(f"Quant ad (g)", value=float(recomendado_g), format="%.2f", key=f"ad_{index}")
+                    
+                    with col_re:
+                        p_real = st.number_input(f"Peso Real (kg)", value=float(recomendado_kg), format="%.8f", key=f"re_{index}")
 
                     lista_lote.append({
                         "data": datetime.now().strftime("%d/%m/%Y"),
@@ -146,10 +142,10 @@ if aba == "🚀 Nova Pigmentação":
                     st.success("Salvo no banco de dados!")
                     st.balloons()
         else:
-            st.error("Fórmula não encontrada na Aba Mestra.")
+            st.error("Fórmula não encontrada.")
 
 elif aba == "📜 Banco de Dados":
-    st.title("📜 Histórico de Pigmentação")
+    st.title("📜 Histórico")
     hist_path = "Historico_Producao.csv"
     if os.path.exists(hist_path):
         df_hist = pd.read_csv(hist_path, sep=';', encoding='latin-1')
@@ -157,12 +153,11 @@ elif aba == "📜 Banco de Dados":
         
         df_excel = formatar_para_excel(df_hist)
         csv_ready = df_excel.to_csv(index=False, sep=';', encoding='latin-1').encode('latin-1')
-        st.download_button("📥 Baixar para Excel (Vírgulas)", csv_ready, "Historico_Controle.csv", "text/csv")
-    else:
-        st.info("O banco de dados está vazio.")
+        st.download_button("📥 Baixar para Excel", csv_ready, "Controle_2026.csv", "text/csv")
 
+# (Demais abas permanecem iguais...)
 elif aba == "➕ Cadastro":
-    st.title("➕ Cadastrar na Aba Mestra")
+    st.title("➕ Novo Pigmento")
     with st.form("cad"):
         t = st.text_input("Produto")
         c = st.text_input("Cor")
@@ -177,3 +172,7 @@ elif aba == "➕ Cadastro":
 elif aba == "📊 Aba Mestra":
     st.title("📊 Dados Cadastrados")
     st.dataframe(df_mestra)
+elif aba == "📊 Aba Mestra":
+    st.title("📊 Dados Cadastrados")
+    st.dataframe(df_mestra)
+
