@@ -10,7 +10,6 @@ def load_data():
     file_path = "Aba_Mestra.csv"
     if os.path.exists(file_path):
         try:
-            # Tenta carregar com diferentes encodings caso haja caracteres especiais
             df = pd.read_csv(file_path, sep=None, engine='python', encoding='latin-1')
             df.columns = [str(c).strip() for c in df.columns]
             if "Quant OP (kg)" in df.columns:
@@ -25,7 +24,6 @@ def salvar_no_historico(dados_lista):
     hist_path = "Historico_Producao.csv"
     novo_df = pd.DataFrame(dados_lista)
     
-    # Ordem exata para as Colunas A até K da sua planilha XLSM
     colunas_excel = [
         "data", "lote", "tipo de produto", "cor", "pigmento", "toque", 
         "Quant ad (g)", "#Plan", "#Real", "Encomenda?", "Litros/Unit"
@@ -45,17 +43,17 @@ def salvar_no_historico(dados_lista):
 df_mestra = load_data()
 
 # --- NAVEGAÇÃO LATERAL ---
-st.sidebar.title("🧪 Menu de Controlo")
+st.sidebar.title("🧪 Menu")
 aba = st.sidebar.radio("Ir para:", ["🚀 Nova Pigmentação", "📜 Banco de Dados", "➕ Cadastro", "📊 Aba Mestra"])
 
-# --- ABA 1: NOVA PIGMENTAÇÃO ---
+# --- ABA 1: NOVA PIGMENTAÇÃO (SEM FORM PARA GATILHO INSTANTÂNEO) ---
 if aba == "🚀 Nova Pigmentação":
-    st.title("🚀 Registar Pigmentação")
+    st.title("🚀 Registar Produção")
     
     if df_mestra.empty:
-        st.warning("Aba Mestra vazia. Por favor, realize o cadastro de pigmentos primeiro.")
+        st.warning("Aba Mestra vazia. Vá em 'Cadastro' primeiro.")
     else:
-        # Identificação
+        # 1. Identificação Superior
         c1, c2, c3 = st.columns(3)
         with c1:
             tipo_sel = st.selectbox("Produto", df_mestra['Tipo'].unique())
@@ -68,7 +66,7 @@ if aba == "🚀 Nova Pigmentação":
 
         st.markdown("---")
         
-        # Unidades e Litragem
+        # 2. Unidades e Litragem
         col_unid, col_litros = st.columns([1, 3])
         with col_unid:
             st.write("*📦 Unidades*")
@@ -78,8 +76,7 @@ if aba == "🚀 Nova Pigmentação":
         with col_litros:
             st.write("*🧪 Litragem / Embalagem*")
             opcoes_vol = ["0,9L", "3L", "3,6L", "13kg", "15L", "18L", "25kg", "Outro"]
-            selecao_vol = st.select_slider("Selecione o Volume Unitário:", options=opcoes_vol, value="15L")
-            
+            selecao_vol = st.select_slider("Volume Unitário:", options=opcoes_vol, value="15L")
             if selecao_vol == "Outro":
                 litros_unit = st.number_input("Valor (L/kg):", min_value=0.01, value=1.0, format="%.2f")
             else:
@@ -90,37 +87,39 @@ if aba == "🚀 Nova Pigmentação":
 
         st.markdown("---")
 
-        # Formulário Dinâmico de Pigmentos
+        # 3. Bloco de Pigmentos Dinâmico
         formulas = df_mestra[(df_mestra['Tipo'] == tipo_sel) & (df_mestra['Cor'] == cor_sel)]
         
         if not formulas.empty:
-            with st.form("form_pigm"):
-                st.subheader("🎨 Composição e Ajuste de Toques")
-                lista_lote = []
+            lista_lote = []
+            st.subheader("🎨 Ajuste de Toques e Pesagens")
+            
+            for index, row in formulas.iterrows():
+                pigm = row['Pigmento']
+                base_kg = row["Quant OP (kg)"]
+                rec_g = base_kg * vol_plan_tot * 1000
                 
-                for index, row in formulas.iterrows():
-                    pigm = row['Pigmento']
-                    base_kg = row["Quant OP (kg)"]
-                    rec_g = base_kg * vol_plan_tot * 1000
-                    
+                with st.container():
                     st.markdown(f"### {pigm}")
                     c_rec, c_tq, c_res = st.columns([1, 1, 1])
-                    c_rec.metric("Sugestão (g)", f"{rec_g:.2f}g")
+                    c_rec.metric("Sugestão", f"{rec_g:.2f}g")
                     
                     with c_tq:
-                        n_toques = st.number_input(f"Qtd de Toques", min_value=1, value=1, key=f"nt_{index}")
+                        # Gatilho instantâneo (sem form)
+                        n_toques = st.number_input(f"Toques para {pigm}", min_value=1, value=1, step=1, key=f"nt_{index}")
                     
-                    # Pesagens individuais
                     soma_adicionada = 0.0
-                    st.write(f"Digite as pesagens para {pigm}:")
+                    st.write(f"Pesagens:")
                     cols_toques = st.columns(4)
+                    
                     for t in range(1, int(n_toques) + 1):
                         with cols_toques[(t-1) % 4]:
-                            valor_t = st.number_input(f"T {t} (g)", min_value=0.0, format="%.2f", key=f"val_{index}_{t}")
+                            # Cada campo de gramas
+                            valor_t = st.number_input(f"T{t} (g)", min_value=0.0, format="%.2f", key=f"val_{index}_{t}")
                             soma_adicionada += valor_t
                     
                     with c_res:
-                        st.metric("Total Adicionado", f"{soma_adicionada:.2f} g")
+                        st.metric("Total Final", f"{soma_adicionada:.2f} g")
                     
                     lista_lote.append({
                         "data": datetime.now().strftime("%d/%m/%Y"),
@@ -136,13 +135,14 @@ if aba == "🚀 Nova Pigmentação":
                         "Litros/Unit": litros_unit
                     })
                     st.markdown("---")
-                
-                if st.form_submit_button("✅ Finalizar e Salvar"):
-                    salvar_no_historico(lista_lote)
-                    st.success("Dados salvos com sucesso!")
-                    st.balloons()
+            
+            # Botão de Finalização Único
+            if st.button("✅ FINALIZAR E SALVAR REGISTRO", use_container_width=True, type="primary"):
+                salvar_no_historico(lista_lote)
+                st.success("Registro guardado no histórico!")
+                st.balloons()
         else:
-            st.error("Nenhuma fórmula encontrada para esta Cor/Produto.")
+            st.error("Fórmula não encontrada.")
 
 # --- ABA 2: BANCO DE DADOS ---
 elif aba == "📜 Banco de Dados":
@@ -151,39 +151,33 @@ elif aba == "📜 Banco de Dados":
         df_hist = pd.read_csv("Historico_Producao.csv", sep=';', encoding='latin-1')
         st.dataframe(df_hist, use_container_width=True)
         
-        # Preparação para Excel (troca ponto por vírgula)
         df_export = df_hist.copy()
         for col in ["Quant ad (g)", "Litros/Unit"]:
             df_export[col] = df_export[col].apply(lambda x: str(x).replace('.', ','))
             
         csv = df_export.to_csv(index=False, sep=';', encoding='latin-1').encode('latin-1')
-        st.download_button("📥 Baixar Base para o Excel", csv, "Controle_Producao.csv", "text/csv")
+        st.download_button("📥 Baixar CSV para Excel", csv, "Controle_Producao.csv", "text/csv")
     else:
-        st.info("Ainda não existem registos no histórico.")
+        st.info("Sem registos.")
 
 # --- ABA 3: CADASTRO ---
 elif aba == "➕ Cadastro":
-    st.title("➕ Cadastro de Pigmentos (Aba Mestra)")
-    st.markdown("Use esta área para adicionar novos produtos ou cores ao sistema.")
+    st.title("➕ Cadastro da Aba Mestra")
     with st.form("cad_novo"):
         col1, col2 = st.columns(2)
         t = col1.text_input("Tipo de Produto")
         c = col2.text_input("Cor")
-        p = col1.text_input("Nome do Pigmento")
-        q = col2.number_input("Quant OP (kg) por 1 Litro", format="%.8f")
-        
-        if st.form_submit_button("Gravar na Aba Mestra"):
+        p = col1.text_input("Pigmento")
+        q = col2.number_input("Formulação (kg por 1L)", format="%.8f")
+        if st.form_submit_button("Salvar na Aba Mestra"):
             if t and c and p:
-                novo_item = pd.DataFrame([{"Tipo": t, "Cor": c, "Pigmento": p, "Quant OP (kg)": q}])
-                df_mestra = pd.concat([df_mestra, novo_item], ignore_index=True)
+                novo = pd.DataFrame([{"Tipo": t, "Cor": c, "Pigmento": p, "Quant OP (kg)": q}])
+                df_mestra = pd.concat([df_mestra, novo], ignore_index=True)
                 df_mestra.to_csv("Aba_Mestra.csv", index=False, encoding='latin-1')
-                st.success(f"Pigmento '{p}' guardado com sucesso!")
+                st.success("Cadastrado!")
                 st.rerun()
-            else:
-                st.error("Preencha todos os campos obrigatórios.")
 
 # --- ABA 4: ABA MESTRA ---
 elif aba == "📊 Aba Mestra":
-    st.title("📊 Consulta da Aba Mestra")
-    st.write("Estes são os valores de referência guardados no sistema:")
+    st.title("📊 Consulta Aba Mestra")
     st.dataframe(df_mestra, use_container_width=True)
