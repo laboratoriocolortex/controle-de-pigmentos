@@ -5,22 +5,33 @@ from datetime import datetime
 
 st.set_page_config(page_title="Controle 2026", layout="wide", page_icon="🧪")
 
-# Customização de estilo para o botão verde suave e redução de margens
+# --- CUSTOMIZAÇÃO DE INTERFACE (CSS) ---
 st.markdown("""
     <style>
-    .stButton>button {
-        background-color: #d4edda;
-        color: #155724;
-        border: 1px solid #c3e6cb;
+    /* Botão de Finalização Verde Suave */
+    div.stButton > button:first-child {
+        background-color: #e1f5fe; /* Azul suave */
+        color: #01579b;
+        border: 1px solid #b3e5fc;
         font-weight: bold;
+        width: 100%;
+        height: 3em;
+        transition: 0.3s;
     }
-    .block-container { padding-top: 1rem; padding-bottom: 0rem; }
-    h3 { margin-bottom: 0rem; font-size: 1.2rem; }
-    hr { margin: 0.5rem 0rem; }
+    div.stButton > button:first-child:hover {
+        background-color: #d4edda; /* Verde suave ao passar o mouse */
+        color: #155724;
+        border-color: #c3e6cb;
+    }
+    /* Compactação de margens e textos */
+    .block-container { padding-top: 1rem; padding-bottom: 1rem; }
+    h3 { margin-bottom: 0rem !important; padding-bottom: 0rem !important; font-size: 1.1rem !important; }
+    .stMetric { padding: 0px !important; }
+    hr { margin: 0.5rem 0rem !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNÇÕES DE DADOS ---
+# --- FUNÇÕES DE CARREGAMENTO E SALVAMENTO ---
 def load_data():
     file_path = "Aba_Mestra.csv"
     if os.path.exists(file_path):
@@ -52,36 +63,32 @@ def salvar_no_historico(dados_lista):
 df_mestra = load_data()
 
 # --- NAVEGAÇÃO ---
-aba = st.sidebar.radio("Menu:", ["🚀 Produção", "📜 Histórico", "➕ Cadastro", "📊 Mestra"])
+aba = st.sidebar.radio("Menu:", ["🚀 Produção", "📜 Banco de Dados", "➕ Cadastro", "📊 Aba Mestra"])
 
 if aba == "🚀 Produção":
+    st.title("🚀 Registrar Produção")
+    
     if df_mestra.empty:
-        st.warning("Aba Mestra vazia.")
+        st.warning("Aba Mestra vazia. Vá em 'Cadastro' primeiro.")
     else:
         # Cabeçalho Compacto
         c1, c2, c3, c4 = st.columns([1.5, 1.5, 1, 1])
-        with c1:
-            tipo_sel = st.selectbox("Produto", df_mestra['Tipo'].unique())
-        with c2:
-            cor_sel = st.selectbox("Cor", df_mestra[df_mestra['Tipo'] == tipo_sel]['Cor'].unique())
-        with c3:
-            lote_id = st.text_input("Lote", value="", placeholder="Lote...")
-        with c4:
-            encomenda = st.selectbox("Enc?", ["Não", "Sim"])
+        with c1: tipo_sel = st.selectbox("Produto", df_mestra['Tipo'].unique())
+        with c2: cor_sel = st.selectbox("Cor", df_mestra[df_mestra['Tipo'] == tipo_sel]['Cor'].unique())
+        with c3: lote_id = st.text_input("Lote", value="", placeholder="Lote...")
+        with c4: encomenda = st.selectbox("Enc?", ["Não", "Sim"])
 
-        # Unidades e Litragem em linha única
+        # Unidades e Litragem
         u1, u2, u3 = st.columns([1, 1, 3])
-        with u1:
-            num_plan = st.number_input("#Plan", min_value=1, step=1, value=None)
-        with u2:
-            num_real = st.number_input("#Real", min_value=1, step=1, value=None)
+        with u1: num_plan = st.number_input("#Plan", min_value=1, step=1, value=None)
+        with u2: num_real = st.number_input("#Real", min_value=1, step=1, value=None)
         with u3:
             opcoes_vol = ["0,9L", "3L", "3,6L", "13kg", "15L", "18L", "25kg", "Outro"]
-            selecao_vol = st.select_slider("Volume:", options=opcoes_vol, value="15L")
+            selecao_vol = st.select_slider("Litragem:", options=opcoes_vol, value="15L")
             litros_unit = float(selecao_vol.replace('L', '').replace('kg', '').replace(',', '.')) if selecao_vol != "Outro" else st.number_input("Valor:", value=None)
         
         vol_plan_tot = (num_plan * litros_unit) if (num_plan and litros_unit) else 0
-        st.caption(f"Volume Planejado: {vol_plan_tot:.2f} L/kg")
+        st.caption(f"Volume Total Planejado: {vol_plan_tot:.2f} L/kg")
         st.markdown("---")
 
         formulas = df_mestra[(df_mestra['Tipo'] == tipo_sel) & (df_mestra['Cor'] == cor_sel)]
@@ -92,44 +99,49 @@ if aba == "🚀 Produção":
                 pigm = row['Pigmento']
                 rec_g = row["Quant OP (kg)"] * vol_plan_tot * 1000
                 
-                # Layout de Pigmento Compacto
-                col_p, col_tq, col_soma = st.columns([2, 1, 1])
-                col_p.markdown(f"*{pigm}*")
-                n_toques = col_tq.number_input(f"Toques", min_value=1, value=1, step=1, key=f"nt_{index}", label_visibility="collapsed")
-                
-                soma_adicionada = 0.0
-                # Grade de pesagens compacta
-                cols_toques = st.columns(6)
-                for t in range(1, int(n_toques) + 1):
-                    with cols_toques[(t-1) % 6]:
-                        valor_t = st.number_input(f"T{t}", min_value=0.0, format="%.2f", value=None, key=f"val_{index}_{t}")
-                        if valor_t: soma_adicionada += valor_t
-                
-                col_soma.markdown(f"*Total: {soma_adicionada:.2f}g* (Sug: {rec_g:.1f}g)")
-                
-                lista_lote.append({
-                    "data": datetime.now().strftime("%d/%m/%Y"), "lote": lote_id, "tipo de produto": tipo_sel,
-                    "cor": cor_sel, "pigmento": pigm, "toque": n_toques, "Quant ad (g)": soma_adicionada,
-                    "#Plan": num_plan if num_plan else 0, "#Real": num_real if num_real else 0, 
-                    "Encomenda?": encomenda, "Litros/Unit": litros_unit
-                })
-                st.markdown("<hr>", unsafe_allow_html=True)
+                with st.container():
+                    # Linha do Pigmento (Nome + Sugestão + Toques)
+                    col_p, col_rec, col_tq = st.columns([2, 1, 1])
+                    col_p.markdown(f"*{pigm}*")
+                    col_rec.caption(f"💡 Sugestão: {rec_g:.2f}g")
+                    with col_tq:
+                        n_toques = st.number_input(f"Toques", min_value=1, value=1, step=1, key=f"nt_{index}", label_visibility="collapsed")
+                    
+                    # Campos de Pesagem em Grade Compacta
+                    soma_adicionada = 0.0
+                    cols_toques = st.columns(6)
+                    for t in range(1, int(n_toques) + 1):
+                        with cols_toques[(t-1) % 6]:
+                            valor_t = st.number_input(f"T{t}", min_value=0.0, format="%.2f", value=None, key=f"val_{index}_{t}")
+                            if valor_t: soma_adicionada += valor_t
+                    
+                    st.markdown(f"<div style='text-align: right; font-size: 0.9rem; color: #555;'>Total: <b>{soma_adicionada:.2f}g</b></div>", unsafe_allow_html=True)
+                    
+                    lista_lote.append({
+                        "data": datetime.now().strftime("%d/%m/%Y"), "lote": lote_id, "tipo de produto": tipo_sel,
+                        "cor": cor_sel, "pigmento": pigm, "toque": n_toques, "Quant ad (g)": soma_adicionada,
+                        "#Plan": num_plan if num_plan else 0, "#Real": num_real if num_real else 0, 
+                        "Encomenda?": encomenda, "Litros/Unit": litros_unit
+                    })
+                    st.markdown("<hr>", unsafe_allow_html=True)
             
-            # Botão de Finalização Verde Suave
-            if st.button("✅ FINALIZAR E SALVAR REGISTRO", use_container_width=True, type="primary"):
+            # Botão de Finalização com cor suave
+            if st.button("✅ FINALIZAR E SALVAR REGISTRO"):
                 if not lote_id or not num_plan:
-                    st.error("Preencha Lote e Unidades!")
+                    st.error("Preencha o Lote e as Unidades!")
                 else:
                     salvar_no_historico(lista_lote)
-                    st.success("Salvo!")
+                    st.success("Salvo com sucesso!")
                     st.balloons()
+        else:
+            st.error("Fórmula não encontrada.")
 
-elif aba == "📜 Histórico":
+elif aba == "📜 Banco de Dados":
     st.title("📜 Histórico")
     if os.path.exists("Historico_Producao.csv"):
         df_hist = pd.read_csv("Historico_Producao.csv", sep=';', encoding='latin-1')
         st.dataframe(df_hist, use_container_width=True)
-        st.download_button("📥 Baixar CSV", df_hist.to_csv(index=False, sep=';', encoding='latin-1').encode('latin-1'), "Producao.csv", "text/csv")
+        st.download_button("📥 Baixar CSV para Excel", df_hist.to_csv(index=False, sep=';', encoding='latin-1').encode('latin-1'), "Producao.csv", "text/csv")
 
 elif aba == "➕ Cadastro":
     st.title("➕ Cadastro")
@@ -137,12 +149,12 @@ elif aba == "➕ Cadastro":
         t = st.text_input("Produto")
         c = st.text_input("Cor")
         p = st.text_input("Pigmento")
-        q = st.number_input("kg/1L", format="%.8f", value=None)
-        if st.form_submit_button("Salvar"):
+        q = st.number_input("Formulação (kg/1L)", format="%.8f", value=None)
+        if st.form_submit_button("Gravar"):
             if t and c and p and q:
                 pd.concat([df_mestra, pd.DataFrame([{"Tipo": t, "Cor": c, "Pigmento": p, "Quant OP (kg)": q}])], ignore_index=True).to_csv("Aba_Mestra.csv", index=False, encoding='latin-1')
                 st.success("Cadastrado!")
                 st.rerun()
 
-elif aba == "📊 Mestra":
+elif aba == "📊 Aba Mestra":
     st.dataframe(df_mestra, use_container_width=True)
