@@ -93,7 +93,7 @@ df_mestra = load_data()
 aba = st.sidebar.radio("Navegação:", ["🚀 Nova Pigmentação", "📜 Banco de Dados", "➕ Cadastro", "📊 Aba Mestra"])
 
 if aba == "🚀 Nova Pigmentação":
-    st.title("🚀 Registrar Produção")
+    st.title("🚀 Registrar Pigmentação")
     
     if df_mestra.empty:
         st.warning("Aba Mestra vazia.")
@@ -183,3 +183,4 @@ elif aba == "➕ Cadastro":
 
 elif aba == "📊 Aba Mestra":
     st.dataframe(df_mestra, use_container_width=True)
+
