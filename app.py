@@ -15,7 +15,6 @@ st.markdown("""
     .block-container { padding-top: 1.5rem; }
     h3 { margin-bottom: 0rem !important; font-size: 1.10rem !important; }
     hr { margin: 0.5rem 0rem !important; }
-    /* Ajuste para inputs numéricos ficarem mais baixos */
     .stNumberInput { margin-bottom: 0rem; }
     </style>
     """, unsafe_allow_html=True)
@@ -73,16 +72,15 @@ def salvar_no_historico(dados_lista):
 
 df_mestra = load_data()
 
-# --- INTERFACE ---
+# --- NAVEGAÇÃO ---
 aba = st.sidebar.radio("Navegação:", ["🚀 Nova Pigmentação", "📜 Banco de Dados", "➕ Cadastro", "📊 Aba Mestra"])
 
 if aba == "🚀 Nova Pigmentação":
     st.title("🚀 Registrar Produção")
     
     if df_mestra.empty:
-        st.warning("Aba Mestra vazia.")
+        st.warning("Aba Mestra vazia. Vá em 'Cadastro' primeiro.")
     else:
-        # Cabeçalho
         c1, c2, c3, c4 = st.columns([1.5, 1.5, 1, 1])
         with c1: tipo_sel = st.selectbox("Produto", df_mestra['Tipo'].unique())
         with c2: cor_sel = st.selectbox("Cor", df_mestra[df_mestra['Tipo'] == tipo_sel]['Cor'].unique())
@@ -91,7 +89,6 @@ if aba == "🚀 Nova Pigmentação":
 
         st.markdown("---")
         
-        # Unidades e Volume
         u1, u2, u3 = st.columns([1, 1, 2])
         with u1: num_plan = st.number_input("#Unid Plan", min_value=1, step=1, value=None)
         with u2: num_real = st.number_input("#Unid Real", min_value=1, step=1, value=None)
@@ -115,7 +112,6 @@ if aba == "🚀 Nova Pigmentação":
                 rec_g = round(row["Quant OP (kg)"] * vol_plan_tot * 1000, 2)
                 
                 with st.container():
-                    # INVERSÃO DE TAMANHOS: Coluna do nome/toque pequena, coluna das pesagens grande
                     col_pigm, col_espaco, col_pesagem = st.columns([1.2, 0.3, 3.5])
                     
                     with col_pigm:
@@ -126,7 +122,7 @@ if aba == "🚀 Nova Pigmentação":
                     with col_pesagem:
                         st.write("Pesagens (g):")
                         soma_adicionada = 0.0
-                        cols_t = st.columns(5) # 5 caixas largas de pesagem
+                        cols_t = st.columns(5)
                         for t in range(1, int(n_toques) + 1):
                             with cols_t[(t-1) % 5]:
                                 valor_t = st.number_input(f"T{t}", min_value=0.0, format="%.2f", value=None, key=f"val_{index}_{t}")
@@ -148,6 +144,37 @@ if aba == "🚀 Nova Pigmentação":
                     salvar_no_historico(lista_lote)
                     st.success("Salvo com sucesso!")
                     st.balloons()
-else:
-    # Restante das abas (Banco de Dados, Cadastro, Aba Mestra) seguem o padrão anterior
-    pass
+
+elif aba == "📜 Banco de Dados":
+    st.title("📜 Histórico de Produção")
+    if os.path.exists("Historico_Producao.csv"):
+        df_hist = pd.read_csv("Historico_Producao.csv", sep=';', encoding='latin-1')
+        st.dataframe(df_hist, use_container_width=True)
+        csv = df_hist.to_csv(index=False, sep=';', encoding='latin-1').encode('latin-1')
+        st.download_button("📥 Baixar CSV para Excel", csv, "Producao_2026.csv", "text/csv")
+    else:
+        st.info("Nenhum registro encontrado no histórico.")
+
+elif aba == "➕ Cadastro":
+    st.title("➕ Cadastro de Aba Mestra")
+    with st.form("cad_novo"):
+        t = st.text_input("Tipo de Produto")
+        c = st.text_input("Cor")
+        p = st.text_input("Pigmento")
+        q = st.number_input("Formulação (kg por 1L)", format="%.8f", value=None)
+        if st.form_submit_button("Salvar"):
+            if t and c and p and q:
+                novo = pd.DataFrame([{"Tipo": t, "Cor": c, "Pigmento": p, "Quant OP (kg)": q}])
+                df_final = pd.concat([df_mestra, novo], ignore_index=True)
+                df_final.to_csv("Aba_Mestra.csv", index=False, encoding='latin-1')
+                st.success("Cadastrado com sucesso!")
+                st.rerun()
+            else:
+                st.error("Preencha todos os campos!")
+
+elif aba == "📊 Aba Mestra":
+    st.title("📊 Consulta Aba Mestra")
+    if not df_mestra.empty:
+        st.dataframe(df_mestra, use_container_width=True)
+    else:
+        st.info("Aba Mestra está vazia.")
