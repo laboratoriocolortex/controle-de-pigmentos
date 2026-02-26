@@ -13,20 +13,25 @@ st.markdown("""
         font-weight: bold; width: 100%; height: 3em;
     }
     .block-container { padding-top: 1.5rem; }
+    .pigmento-header { 
+        background-color: #f8f9fa; 
+        padding: 10px; 
+        border-radius: 5px; 
+        margin-top: 10px;
+        border-left: 5px solid #007bff;
+    }
     h3 { margin-bottom: 0rem !important; font-size: 1.15rem !important; }
     hr { margin: 0.7rem 0rem !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNÇÃO PARA FORMATAR NÚMEROS (PADRÃO EXCEL BRASIL) ---
+# --- FUNÇÃO PARA FORMATAR NÚMEROS (PADRÃO EXCEL) ---
 def format_excel_num(valor):
     if valor is None or valor == "": return ""
     try:
         val_float = float(valor)
-        # Se for um número inteiro (ex: 15.0 -> 15)
         if val_float == int(val_float):
             return str(int(val_float))
-        # Se for decimal, troca ponto por vírgula (ex: 3.6 -> 3,6)
         return f"{val_float:.2f}".replace('.', ',')
     except:
         return str(valor)
@@ -49,13 +54,12 @@ def load_data():
 def salvar_no_historico(dados_lista):
     hist_path = "Historico_Producao.csv"
     
-    # Processamento para o CSV conforme solicitado
     for i, item in enumerate(dados_lista):
-        # 1. Formata números de pesagem e sugestão (sempre em todas as linhas)
-        item["Sugestão (g)"] = format_excel_num(item["Sugestão (g)"])
+        # Formatação de números
+        item["Quantidade OP"] = format_excel_num(item["Quantidade OP"])
         item["Quant ad (g)"] = format_excel_num(item["Quant ad (g)"])
         
-        # 2. Preenche #Plan, #Real e Litros apenas na PRIMEIRA linha do lote
+        # Preenchimento seletivo (apenas 1ª linha)
         if i == 0:
             item["#Plan"] = format_excel_num(item["#Plan"])
             item["#Real"] = format_excel_num(item["#Real"])
@@ -66,7 +70,11 @@ def salvar_no_historico(dados_lista):
             item["Litros/Unit"] = ""
 
     novo_df = pd.DataFrame(dados_lista)
-    colunas_excel = ["data", "lote", "tipo de produto", "cor", "pigmento", "toque", "Sugestão (g)", "Quant ad (g)", "#Plan", "#Real", "Encomenda?", "Litros/Unit"]
+    # ORDEM DAS COLUNAS: Quant ad (g) antes de Quantidade OP
+    colunas_excel = [
+        "data", "lote", "tipo de produto", "cor", "pigmento", "toque", 
+        "Quant ad (g)", "Quantidade OP", "#Plan", "#Real", "Encomenda?", "Litros/Unit"
+    ]
     
     if os.path.exists(hist_path):
         try:
@@ -102,18 +110,14 @@ if aba == "🚀 Nova Pigmentação":
         with u1: num_plan = st.number_input("#Unid Plan", min_value=1, step=1, value=None)
         with u2: num_real = st.number_input("#Unid Real", min_value=1, step=1, value=None)
         with u3:
-            # ADICIONADO 5kg NO SLIDER ABAIXO
             opcoes_vol = ["0,9L", "3L", "3,6L", "5kg", "13kg", "15L", "18L", "25kg", "Outro"]
             selecao_vol = st.select_slider("Embalagem:", options=opcoes_vol, value="15L")
-            
-            # Lógica para converter string do slider em número real
-            if selecao_vol == "Outro":
-                litros_unit = st.number_input("Valor Unit:", value=None)
-            else:
-                litros_unit = float(selecao_vol.replace('L', '').replace('kg', '').replace(',', '.'))
+            litros_unit = float(selecao_vol.replace('L', '').replace('kg', '').replace(',', '.')) if selecao_vol != "Outro" else st.number_input("Valor Unit:", value=None)
         
         vol_plan_tot = (num_plan * litros_unit) if (num_plan and litros_unit) else 0
         st.caption(f"Volume de Cálculo: {vol_plan_tot:.2f} Total")
+        
+        st.subheader("🎨 Pigmentos") # Identificação da seção
         st.markdown("---")
 
         formulas = df_mestra[(df_mestra['Tipo'] == tipo_sel) & (df_mestra['Cor'] == cor_sel)]
@@ -124,28 +128,31 @@ if aba == "🚀 Nova Pigmentação":
                 pigm = row['Pigmento']
                 rec_g = round(row["Quant OP (kg)"] * vol_plan_tot * 1000, 2)
                 
-                col_nome, col_info, col_tq_input = st.columns([2, 1, 1])
-                col_nome.markdown(f"### {pigm}")
-                col_info.caption(f"Sugestão: {rec_g}g")
-                with col_tq_input:
-                    n_toques = st.number_input(f"Tq_{index}", min_value=1, value=1, step=1, key=f"nt_{index}", label_visibility="collapsed")
-                
-                soma_adicionada = 0.0
-                cols_toques = st.columns(6)
-                for t in range(1, int(n_toques) + 1):
-                    with cols_toques[(t-1) % 6]:
-                        valor_t = st.number_input(f"T{t}", min_value=0.0, format="%.2f", value=None, key=f"val_{index}_{t}")
-                        if valor_t: soma_adicionada += valor_t
-                
-                st.markdown(f"*Total Adicionado: {soma_adicionada:.2f} g*")
-                
-                lista_lote.append({
-                    "data": datetime.now().strftime("%d/%m/%Y"), "lote": lote_id, "tipo de produto": tipo_sel,
-                    "cor": cor_sel, "pigmento": pigm, "toque": n_toques, "Sugestão (g)": rec_g, 
-                    "Quant ad (g)": soma_adicionada, "#Plan": num_plan, "#Real": num_real, 
-                    "Encomenda?": encomenda, "Litros/Unit": litros_unit
-                })
-                st.markdown("<hr>", unsafe_allow_html=True)
+                with st.container():
+                    # Linha de cabeçalho do pigmento mais robusta
+                    col_nome, col_info, col_tq_input = st.columns([2, 1, 1])
+                    col_nome.markdown(f"### {pigm}")
+                    col_info.caption(f"Sugestão Técnica: {rec_g}g")
+                    with col_tq_input:
+                        # TOQUES com label visível novamente
+                        n_toques = st.number_input(f"Toques", min_value=1, value=1, step=1, key=f"nt_{index}")
+                    
+                    soma_adicionada = 0.0
+                    cols_toques = st.columns(6)
+                    for t in range(1, int(n_toques) + 1):
+                        with cols_toques[(t-1) % 6]:
+                            valor_t = st.number_input(f"T{t}", min_value=0.0, format="%.2f", value=None, key=f"val_{index}_{t}")
+                            if valor_t: soma_adicionada += valor_t
+                    
+                    st.markdown(f"*Total Adicionado: {soma_adicionada:.2f} g*")
+                    
+                    lista_lote.append({
+                        "data": datetime.now().strftime("%d/%m/%Y"), "lote": lote_id, "tipo de produto": tipo_sel,
+                        "cor": cor_sel, "pigmento": pigm, "toque": n_toques, "Quantidade OP": rec_g, 
+                        "Quant ad (g)": soma_adicionada, "#Plan": num_plan, "#Real": num_real, 
+                        "Encomenda?": encomenda, "Litros/Unit": litros_unit
+                    })
+                    st.markdown("<hr>", unsafe_allow_html=True)
             
             if st.button("✅ FINALIZAR E SALVAR REGISTRO", use_container_width=True):
                 if not lote_id or not num_plan:
@@ -160,7 +167,7 @@ elif aba == "📜 Banco de Dados":
     if os.path.exists("Historico_Producao.csv"):
         df_hist = pd.read_csv("Historico_Producao.csv", sep=';', encoding='latin-1')
         st.dataframe(df_hist, use_container_width=True)
-        st.download_button("📥 Baixar CSV para Excel", df_hist.to_csv(index=False, sep=';', encoding='latin-1').encode('latin-1'), "Producao.csv", "text/csv")
+        st.download_button("📥 Baixar CSV", df_hist.to_csv(index=False, sep=';', encoding='latin-1').encode('latin-1'), "Producao.csv", "text/csv")
 
 elif aba == "➕ Cadastro":
     st.title("➕ Cadastro")
