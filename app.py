@@ -206,7 +206,9 @@ elif aba == "📋 Padrões":
     st.title("📋 Evolução de Padrões Técnicos")
     if os.path.exists("Padroes_Registrados.csv"):
         df_p = pd.read_csv("Padroes_Registrados.csv", sep=';', encoding='latin-1')
-        st.dataframe(df_p, use_container_width=True)
+        
+        # FORÇA A EXIBIÇÃO COM 6 CASAS DECIMAIS NA TELA
+        st.dataframe(df_p.style.format({"Novo Coef (kg/L)": "{:.6f}"}), use_container_width=True)
     else: st.info("Sem atualizações.")
 
 elif aba == "📜 Banco de Dados":
