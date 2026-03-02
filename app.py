@@ -43,16 +43,15 @@ def load_data(file="Aba_Mestra.csv"):
     return pd.DataFrame()
 
 def atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_total):
-    """Atualiza a Aba Mestra e alimenta a nova Aba Padrões"""
+    """Atualiza a Aba Mestra e a Aba Padrões com 6 casas decimais"""
     padroes_file = "Padroes_Registrados.csv"
     novos_registros_padrao = []
     data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
 
     for item in lista_lote:
-        # Cálculo do coeficiente
+        # Cálculo do coeficiente (g para kg por Litro)
         novo_coef = (item["Quant ad (g_num)"] / 1000) / vol_total if vol_total > 0 else 0
         
-        # 1. ATUALIZAÇÃO DA ABA MESTRA
         mask = (df_mestra['Tipo'] == item["tipo de produto"]) & \
                (df_mestra['Cor'] == item["cor"]) & \
                (df_mestra['Pigmento'] == item["pigmento"])
@@ -63,26 +62,25 @@ def atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_total):
             else:
                 df_mestra.loc[mask, 'Quant OP (kg)'] = novo_coef
         
-        # 2. PREPARAÇÃO PARA A ABA PADRÕES
+        # Inserção no histórico de padrões com 6 casas decimais
         novos_registros_padrao.append({
             "Data Alteração": data_atual,
             "Produto": item["tipo de produto"],
             "Cor": item["cor"],
             "Pigmento": item["pigmento"],
-            "Novo Coef (kg/L)": novo_coef,
+            "Novo Coef (kg/L)": round(novo_coef, 6), # <--- AJUSTE PARA 6 CASAS
             "Lote Origem": item["lote"]
         })
 
-    # Salva Aba Mestra
     df_mestra.to_csv("Aba_Mestra.csv", index=False, encoding='latin-1')
     
-    # Salva/Atualiza Aba Padrões
     df_p = pd.DataFrame(novos_registros_padrao)
     if os.path.exists(padroes_file):
         hist_p = pd.read_csv(padroes_file, encoding='latin-1', sep=';')
         df_p = pd.concat([hist_p, df_p], ignore_index=True)
-    df_p.to_csv(padroes_file, index=False, sep=';', encoding='latin-1')
     
+    # Salva com separador ; para facilitar abertura no Excel
+    df_p.to_csv(padroes_file, index=False, sep=';', encoding='latin-1')
     return df_mestra
 
 def salvar_no_historico(dados_lista):
@@ -175,7 +173,7 @@ if aba == "🚀 Nova Pigmentação":
                     })
                     st.markdown("<hr>", unsafe_allow_html=True)
             
-            marcar_novo_padrao = st.checkbox("⚠️ Definir como NOVO PADRÃO? (Atualiza Aba Mestra e Aba Padrões)")
+            marcar_novo_padrao = st.checkbox("⚠️ Definir como NOVO PADRÃO?")
             
             if st.button("✅ FINALIZAR E SALVAR REGISTRO", use_container_width=True):
                 if not lote_id or not num_plan:
@@ -183,27 +181,26 @@ if aba == "🚀 Nova Pigmentação":
                 else:
                     if marcar_novo_padrao:
                         df_mestra = atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_plan_tot)
-                        st.warning("Padrão atualizado em todas as bases!")
+                        st.warning("Padrão atualizado com alta precisão (6 casas decimais)!")
                     
                     salvar_no_historico(lista_lote)
                     st.success("Registro concluído!")
                     st.balloons()
 
 elif aba == "📋 Padrões":
-    st.title("📋 Histórico de Evolução de Padrões")
+    st.title("📋 Evolução de Padrões")
     if os.path.exists("Padroes_Registrados.csv"):
         df_p = pd.read_csv("Padroes_Registrados.csv", sep=';', encoding='latin-1')
-        st.write("Estes são os produtos que sofreram atualização de padrão via produção:")
-        st.dataframe(df_p, use_container_width=True)
+        # Formata a visualização da tabela para garantir que as 6 casas apareçam no Streamlit
+        st.dataframe(df_p.style.format({"Novo Coef (kg/L)": "{:.6f}"}), use_container_width=True)
     else:
-        st.info("Nenhum padrão foi atualizado via produção ainda.")
+        st.info("Nenhum padrão atualizado via produção.")
 
 elif aba == "📜 Banco de Dados":
     st.title("📜 Histórico Geral")
     if os.path.exists("Historico_Producao.csv"):
         df_hist = pd.read_csv("Historico_Producao.csv", sep=';', encoding='latin-1')
         st.dataframe(df_hist, use_container_width=True)
-    else: st.info("Vazio.")
 
 elif aba == "➕ Cadastro":
     st.title("➕ Cadastro Manual")
@@ -215,5 +212,6 @@ elif aba == "➕ Cadastro":
             st.success("Cadastrado!"); st.rerun()
 
 elif aba == "📊 Aba Mestra":
-    st.title("📊 Consulta Aba Mestra (Atual)")
-    st.dataframe(df_mestra, use_container_width=True)
+    st.title("📊 Aba Mestra (Atual)")
+    # Também formata a visualização aqui para conferência
+    st.dataframe(df_mestra.style.format({"Quant OP (kg)": "{:.6f}"}), use_container_width=True)
