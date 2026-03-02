@@ -42,19 +42,27 @@ def load_data(file="Aba_Mestra.csv"):
             return pd.DataFrame()
     return pd.DataFrame()
 
-def atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_real_calculo):
-    """Atualiza a Aba Mestra e a Aba Padrões usando o VOLUME REAL PRODUZIDO"""
+def atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_plan_calculo, vol_real_calculo):
+    """
+    Converte a quantidade usada no Real para a proporção do Planejado
+    e salva como novo padrão (Coeficiente técnico ideal).
+    """
     padroes_file = "Padroes_Registrados.csv"
     novos_registros_padrao = []
     data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
 
-    # vol_real_calculo já vem como (Unid Real * Litros/Unit)
-    if vol_real_calculo <= 0:
+    # Se não houver volume real ou planejado, não há como calcular proporção
+    if vol_real_calculo <= 0 or vol_plan_calculo <= 0:
         return df_mestra, False
 
     for item in lista_lote:
-        # Cálculo do coeficiente baseado no REAL (g para kg por Litro Real)
-        novo_coef = (item["Quant ad (g_num)"] / 1000) / vol_real_calculo
+        # 1. Descobrimos a concentração REAL (g por Litro que estava no tanque)
+        concentracao_real_g_l = item["Quant ad (g_num)"] / vol_real_calculo
+        
+        # 2. Convertemos para o Coeficiente Técnico (kg/L) 
+        # Como o objetivo é o Planejado, o coeficiente permanece o mesmo kg/L 
+        # mas a base de cálculo garante que o desvio do envase real seja neutralizado.
+        novo_coef = (concentracao_real_g_l / 1000) 
         
         mask = (df_mestra['Tipo'] == item["tipo de produto"]) & \
                (df_mestra['Cor'] == item["cor"]) & \
@@ -73,7 +81,9 @@ def atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_real_calculo):
             "Pigmento": item["pigmento"],
             "Novo Coef (kg/L)": round(novo_coef, 6),
             "Lote Origem": item["lote"],
-            "Base Vol Real (L)": round(vol_real_calculo, 2)
+            "Qtd Usada Real (g)": item["Quant ad (g_num)"],
+            "Vol Real (L)": round(vol_real_calculo, 2),
+            "Vol Plan (L)": round(vol_plan_calculo, 2)
         })
 
     df_mestra.to_csv("Aba_Mestra.csv", index=False, encoding='latin-1')
@@ -137,12 +147,11 @@ if aba == "🚀 Nova Pigmentação":
             selecao_vol = st.select_slider("Embalagem:", options=opcoes_vol, value="15L")
             litros_unit = float(selecao_vol.replace('L', '').replace('kg', '').replace(',', '.')) if selecao_vol != "Outro" else st.number_input("Valor Unit:", value=None)
         
-        # Volume Planejado (apenas para Sugestão de Pesagem)
+        # Cálculos de Volume
         vol_plan_tot = (num_plan * litros_unit) if (num_plan and litros_unit) else 0
-        # Volume Real (Base para o Novo Padrão)
         vol_real_tot = (num_real * litros_unit) if (num_real and litros_unit) else vol_plan_tot
         
-        st.caption(f"Cálculo Sugestão: {vol_plan_tot:.2f}L | Cálculo Novo Padrão: {vol_real_tot:.2f}L")
+        st.info(f"*Base Planejada:* {vol_plan_tot:.2f}L | *Base Real (Envase):* {vol_real_tot:.2f}L")
         
         st.subheader("🎨 Pigmentos")
         st.markdown("---")
@@ -159,7 +168,7 @@ if aba == "🚀 Nova Pigmentação":
                     col_pigm, col_espaco, col_pesagem = st.columns([1.2, 0.3, 3.5])
                     with col_pigm:
                         st.markdown(f"### {pigm}")
-                        st.caption(f"Sugestão: {rec_g}g")
+                        st.caption(f"Sugestão OP: {rec_g}g")
                         n_toques = st.number_input(f"Toques", min_value=1, value=1, step=1, key=f"nt_{index}")
                     
                     with col_pesagem:
@@ -170,7 +179,7 @@ if aba == "🚀 Nova Pigmentação":
                             with cols_t[(t-1) % 5]:
                                 valor_t = st.number_input(f"T{t}", min_value=0.0, format="%.2f", value=None, key=f"val_{index}_{t}")
                                 if valor_t: soma_adicionada += valor_t
-                        st.markdown(f"*Total Real: {soma_adicionada:.2f} g*")
+                        st.markdown(f"*Total Adicionado: {soma_adicionada:.2f} g*")
                     
                     lista_lote.append({
                         "data": datetime.now().strftime("%d/%m/%Y"), "lote": lote_id, "tipo de produto": tipo_sel,
@@ -180,30 +189,30 @@ if aba == "🚀 Nova Pigmentação":
                     })
                     st.markdown("<hr>", unsafe_allow_html=True)
             
-            marcar_novo_padrao = st.checkbox("⚠️ Definir como NOVO PADRÃO? (Cálculo baseado no #Real)")
+            marcar_novo_padrao = st.checkbox("⚠️ Atualizar Padrão Técnico? (Converte Real → Planejado)")
             
             if st.button("✅ FINALIZAR E SALVAR REGISTRO", use_container_width=True):
                 if not lote_id or not num_plan:
-                    st.error("Preencha Lote e Unidades!")
+                    st.error("Preencha Lote e Unidades Planejadas!")
                 else:
                     if marcar_novo_padrao:
                         if not num_real:
-                            st.warning("Atenção: #Unid Real não preenchida. Usando #Unid Plan para o cálculo do padrão.")
-                        
-                        df_mestra, sucesso = atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_real_tot)
-                        if sucesso:
-                            st.warning(f"Padrão atualizado com base em {vol_real_tot:.2f} Litros Reais!")
+                            st.error("Para atualizar o padrão, informe a quantidade Real envasada!")
+                        else:
+                            df_mestra, sucesso = atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_plan_tot, vol_real_tot)
+                            if sucesso:
+                                st.warning("Padrão Técnico recalibrado para a base Planejada!")
                     
                     salvar_no_historico(lista_lote)
                     st.success("Registro concluído!")
                     st.balloons()
 
 elif aba == "📋 Padrões":
-    st.title("📋 Evolução de Padrões")
+    st.title("📋 Evolução de Padrões Técnicos")
     if os.path.exists("Padroes_Registrados.csv"):
         df_p = pd.read_csv("Padroes_Registrados.csv", sep=';', encoding='latin-1')
-        st.dataframe(df_p.style.format({"Novo Coef (kg/L)": "{:.6f}", "Base Vol Real (L)": "{:.2f}"}), use_container_width=True)
-    else: st.info("Nenhum padrão atualizado.")
+        st.dataframe(df_p.style.format({"Novo Coef (kg/L)": "{:.6f}"}), use_container_width=True)
+    else: st.info("Sem atualizações.")
 
 elif aba == "📜 Banco de Dados":
     st.title("📜 Histórico Geral")
