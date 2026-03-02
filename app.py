@@ -19,13 +19,12 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- FUNÇÕES AUXILIARES ---
-def format_excel_num(valor):
+def format_num_padrao(valor, casas=2):
+    """Formata número para ponto decimal e arredonda casas"""
     if valor is None or valor == "": return ""
     try:
         val_float = float(valor)
-        if val_float == int(val_float):
-            return str(int(val_float))
-        return f"{val_float:.2f}".replace('.', ',')
+        return f"{val_float:.{casas}f}" # Mantém ponto e formata casas
     except:
         return str(valor)
 
@@ -43,25 +42,19 @@ def load_data(file="Aba_Mestra.csv"):
     return pd.DataFrame()
 
 def atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_plan_calculo, vol_real_calculo):
-    """
-    Converte a quantidade usada no Real para a proporção do Planejado
-    e salva como novo padrão (Coeficiente técnico ideal).
-    """
+    """Atualiza a Aba Mestra e a Aba Padrões (Ponto decimal + 2 casas nos volumes)"""
     padroes_file = "Padroes_Registrados.csv"
     novos_registros_padrao = []
     data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
 
-    # Se não houver volume real ou planejado, não há como calcular proporção
     if vol_real_calculo <= 0 or vol_plan_calculo <= 0:
         return df_mestra, False
 
     for item in lista_lote:
-        # 1. Descobrimos a concentração REAL (g por Litro que estava no tanque)
+        # Concentração Real (g/L)
         concentracao_real_g_l = item["Quant ad (g_num)"] / vol_real_calculo
         
-        # 2. Convertemos para o Coeficiente Técnico (kg/L) 
-        # Como o objetivo é o Planejado, o coeficiente permanece o mesmo kg/L 
-        # mas a base de cálculo garante que o desvio do envase real seja neutralizado.
+        # Coeficiente Técnico Ideal (kg/L)
         novo_coef = (concentracao_real_g_l / 1000) 
         
         mask = (df_mestra['Tipo'] == item["tipo de produto"]) & \
@@ -74,16 +67,17 @@ def atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_plan_calculo, vol_real
             else:
                 df_mestra.loc[mask, 'Quant OP (kg)'] = novo_coef
         
+        # PREPARAÇÃO COM PONTO DECIMAL E CASAS AJUSTADAS
         novos_registros_padrao.append({
             "Data Alteração": data_atual,
             "Produto": item["tipo de produto"],
             "Cor": item["cor"],
             "Pigmento": item["pigmento"],
-            "Novo Coef (kg/L)": round(novo_coef, 6),
+            "Novo Coef (kg/L)": format_num_padrao(novo_coef, 6), # 6 casas p/ coeficiente
             "Lote Origem": item["lote"],
-            "Qtd Usada Real (g)": item["Quant ad (g_num)"],
-            "Vol Real (L)": round(vol_real_calculo, 2),
-            "Vol Plan (L)": round(vol_plan_calculo, 2)
+            "Qtd Usada Real (g)": format_num_padrao(item["Quant ad (g_num)"], 2), # 2 casas
+            "Vol Real (L)": format_num_padrao(vol_real_calculo, 2), # 2 casas
+            "Vol Plan (L)": format_num_padrao(vol_plan_calculo, 2) # 2 casas
         })
 
     df_mestra.to_csv("Aba_Mestra.csv", index=False, encoding='latin-1')
@@ -93,6 +87,7 @@ def atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_plan_calculo, vol_real
         hist_p = pd.read_csv(padroes_file, encoding='latin-1', sep=';')
         df_p = pd.concat([hist_p, df_p], ignore_index=True)
     
+    # Salva com separador ; para Excel BR (mas usa ponto nos números)
     df_p.to_csv(padroes_file, index=False, sep=';', encoding='latin-1')
     return df_mestra, True
 
@@ -101,12 +96,13 @@ def salvar_no_historico(dados_lista):
     processados = []
     for i, item in enumerate(dados_lista):
         temp = item.copy()
-        temp["Quantidade OP"] = format_excel_num(temp["Quantidade OP"])
-        temp["Quant ad (g)"] = format_excel_num(temp["Quant ad (g)"])
+        # Historico também usa ponto
+        temp["Quantidade OP"] = format_num_padrao(temp["Quantidade OP"])
+        temp["Quant ad (g)"] = format_num_padrao(temp["Quant ad (g)"])
         if i == 0:
-            temp["#Plan"] = format_excel_num(temp["#Plan"])
-            temp["#Real"] = format_excel_num(temp["#Real"])
-            temp["Litros/Unit"] = format_excel_num(temp["Litros/Unit"])
+            temp["#Plan"] = format_num_padrao(temp["#Plan"])
+            temp["#Real"] = format_num_padrao(temp["#Real"])
+            temp["Litros/Unit"] = format_num_padrao(temp["Litros/Unit"])
         else:
             temp["#Plan"] = ""; temp["#Real"] = ""; temp["Litros/Unit"] = ""
         if "Quant ad (g_num)" in temp: del temp["Quant ad (g_num)"]
@@ -147,7 +143,6 @@ if aba == "🚀 Nova Pigmentação":
             selecao_vol = st.select_slider("Embalagem:", options=opcoes_vol, value="15L")
             litros_unit = float(selecao_vol.replace('L', '').replace('kg', '').replace(',', '.')) if selecao_vol != "Outro" else st.number_input("Valor Unit:", value=None)
         
-        # Cálculos de Volume
         vol_plan_tot = (num_plan * litros_unit) if (num_plan and litros_unit) else 0
         vol_real_tot = (num_real * litros_unit) if (num_real and litros_unit) else vol_plan_tot
         
@@ -211,7 +206,7 @@ elif aba == "📋 Padrões":
     st.title("📋 Evolução de Padrões Técnicos")
     if os.path.exists("Padroes_Registrados.csv"):
         df_p = pd.read_csv("Padroes_Registrados.csv", sep=';', encoding='latin-1')
-        st.dataframe(df_p.style.format({"Novo Coef (kg/L)": "{:.6f}"}), use_container_width=True)
+        st.dataframe(df_p, use_container_width=True)
     else: st.info("Sem atualizações.")
 
 elif aba == "📜 Banco de Dados":
