@@ -42,7 +42,7 @@ def load_data(file="Aba_Mestra.csv"):
     return pd.DataFrame()
 
 def atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_plan_calculo, vol_real_calculo):
-    """Atualiza a Aba Mestra e a Aba Padrões (Ponto decimal + 2 casas nos volumes)"""
+    """Atualiza a Aba Mestra e a Aba Padrões (Ponto decimal + 6 casas no coef)"""
     padroes_file = "Padroes_Registrados.csv"
     novos_registros_padrao = []
     data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
@@ -73,7 +73,7 @@ def atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_plan_calculo, vol_real
             "Produto": item["tipo de produto"],
             "Cor": item["cor"],
             "Pigmento": item["pigmento"],
-            "Novo Coef (kg/L)": format_num_padrao(novo_coef, 6), # 6 casas p/ coeficiente
+            "Novo Coef (kg/L)": format_num_padrao(novo_coef, 6), # <--- 6 CASAS P/ COEFICIENTE
             "Lote Origem": item["lote"],
             "Qtd Usada Real (g)": format_num_padrao(item["Quant ad (g_num)"], 2), # 2 casas
             "Vol Real (L)": format_num_padrao(vol_real_calculo, 2), # 2 casas
