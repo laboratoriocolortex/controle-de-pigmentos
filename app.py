@@ -42,15 +42,19 @@ def load_data(file="Aba_Mestra.csv"):
             return pd.DataFrame()
     return pd.DataFrame()
 
-def atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_total):
-    """Atualiza a Aba Mestra e a Aba Padrões com 6 casas decimais"""
+def atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_real_calculo):
+    """Atualiza a Aba Mestra e a Aba Padrões usando o VOLUME REAL PRODUZIDO"""
     padroes_file = "Padroes_Registrados.csv"
     novos_registros_padrao = []
     data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
 
+    # vol_real_calculo já vem como (Unid Real * Litros/Unit)
+    if vol_real_calculo <= 0:
+        return df_mestra, False
+
     for item in lista_lote:
-        # Cálculo do coeficiente (g para kg por Litro)
-        novo_coef = (item["Quant ad (g_num)"] / 1000) / vol_total if vol_total > 0 else 0
+        # Cálculo do coeficiente baseado no REAL (g para kg por Litro Real)
+        novo_coef = (item["Quant ad (g_num)"] / 1000) / vol_real_calculo
         
         mask = (df_mestra['Tipo'] == item["tipo de produto"]) & \
                (df_mestra['Cor'] == item["cor"]) & \
@@ -62,14 +66,14 @@ def atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_total):
             else:
                 df_mestra.loc[mask, 'Quant OP (kg)'] = novo_coef
         
-        # Inserção no histórico de padrões com 6 casas decimais
         novos_registros_padrao.append({
             "Data Alteração": data_atual,
             "Produto": item["tipo de produto"],
             "Cor": item["cor"],
             "Pigmento": item["pigmento"],
-            "Novo Coef (kg/L)": round(novo_coef, 6), # <--- AJUSTE PARA 6 CASAS
-            "Lote Origem": item["lote"]
+            "Novo Coef (kg/L)": round(novo_coef, 6),
+            "Lote Origem": item["lote"],
+            "Base Vol Real (L)": round(vol_real_calculo, 2)
         })
 
     df_mestra.to_csv("Aba_Mestra.csv", index=False, encoding='latin-1')
@@ -79,9 +83,8 @@ def atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_total):
         hist_p = pd.read_csv(padroes_file, encoding='latin-1', sep=';')
         df_p = pd.concat([hist_p, df_p], ignore_index=True)
     
-    # Salva com separador ; para facilitar abertura no Excel
     df_p.to_csv(padroes_file, index=False, sep=';', encoding='latin-1')
-    return df_mestra
+    return df_mestra, True
 
 def salvar_no_historico(dados_lista):
     hist_path = "Historico_Producao.csv"
@@ -134,8 +137,12 @@ if aba == "🚀 Nova Pigmentação":
             selecao_vol = st.select_slider("Embalagem:", options=opcoes_vol, value="15L")
             litros_unit = float(selecao_vol.replace('L', '').replace('kg', '').replace(',', '.')) if selecao_vol != "Outro" else st.number_input("Valor Unit:", value=None)
         
+        # Volume Planejado (apenas para Sugestão de Pesagem)
         vol_plan_tot = (num_plan * litros_unit) if (num_plan and litros_unit) else 0
-        st.caption(f"Volume de Cálculo: {vol_plan_tot:.2f} Total")
+        # Volume Real (Base para o Novo Padrão)
+        vol_real_tot = (num_real * litros_unit) if (num_real and litros_unit) else vol_plan_tot
+        
+        st.caption(f"Cálculo Sugestão: {vol_plan_tot:.2f}L | Cálculo Novo Padrão: {vol_real_tot:.2f}L")
         
         st.subheader("🎨 Pigmentos")
         st.markdown("---")
@@ -173,15 +180,19 @@ if aba == "🚀 Nova Pigmentação":
                     })
                     st.markdown("<hr>", unsafe_allow_html=True)
             
-            marcar_novo_padrao = st.checkbox("⚠️ Definir como NOVO PADRÃO?")
+            marcar_novo_padrao = st.checkbox("⚠️ Definir como NOVO PADRÃO? (Cálculo baseado no #Real)")
             
             if st.button("✅ FINALIZAR E SALVAR REGISTRO", use_container_width=True):
                 if not lote_id or not num_plan:
                     st.error("Preencha Lote e Unidades!")
                 else:
                     if marcar_novo_padrao:
-                        df_mestra = atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_plan_tot)
-                        st.warning("Padrão atualizado com alta precisão (6 casas decimais)!")
+                        if not num_real:
+                            st.warning("Atenção: #Unid Real não preenchida. Usando #Unid Plan para o cálculo do padrão.")
+                        
+                        df_mestra, sucesso = atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_real_tot)
+                        if sucesso:
+                            st.warning(f"Padrão atualizado com base em {vol_real_tot:.2f} Litros Reais!")
                     
                     salvar_no_historico(lista_lote)
                     st.success("Registro concluído!")
@@ -191,10 +202,8 @@ elif aba == "📋 Padrões":
     st.title("📋 Evolução de Padrões")
     if os.path.exists("Padroes_Registrados.csv"):
         df_p = pd.read_csv("Padroes_Registrados.csv", sep=';', encoding='latin-1')
-        # Formata a visualização da tabela para garantir que as 6 casas apareçam no Streamlit
-        st.dataframe(df_p.style.format({"Novo Coef (kg/L)": "{:.6f}"}), use_container_width=True)
-    else:
-        st.info("Nenhum padrão atualizado via produção.")
+        st.dataframe(df_p.style.format({"Novo Coef (kg/L)": "{:.6f}", "Base Vol Real (L)": "{:.2f}"}), use_container_width=True)
+    else: st.info("Nenhum padrão atualizado.")
 
 elif aba == "📜 Banco de Dados":
     st.title("📜 Histórico Geral")
@@ -213,5 +222,4 @@ elif aba == "➕ Cadastro":
 
 elif aba == "📊 Aba Mestra":
     st.title("📊 Aba Mestra (Atual)")
-    # Também formata a visualização aqui para conferência
     st.dataframe(df_mestra.style.format({"Quant OP (kg)": "{:.6f}"}), use_container_width=True)
