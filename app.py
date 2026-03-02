@@ -15,11 +15,10 @@ st.markdown("""
     .block-container { padding-top: 1.5rem; }
     h3 { margin-bottom: 0rem !important; font-size: 1.10rem !important; }
     hr { margin: 0.5rem 0rem !important; }
-    .stNumberInput { margin-bottom: 0rem; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNÇÃO PARA FORMATAR NÚMEROS (PADRÃO EXCEL) ---
+# --- FUNÇÕES AUXILIARES ---
 def format_excel_num(valor):
     if valor is None or valor == "": return ""
     try:
@@ -30,56 +29,97 @@ def format_excel_num(valor):
     except:
         return str(valor)
 
-# --- FUNÇÕES DE DADOS ---
-def load_data():
-    file_path = "Aba_Mestra.csv"
-    if os.path.exists(file_path):
+def load_data(file="Aba_Mestra.csv"):
+    if os.path.exists(file):
         try:
-            df = pd.read_csv(file_path, sep=None, engine='python', encoding='latin-1')
+            df = pd.read_csv(file, sep=None, engine='python', encoding='latin-1')
             df.columns = [str(c).strip() for c in df.columns]
             if "Quant OP (kg)" in df.columns:
                 df["Quant OP (kg)"] = df["Quant OP (kg)"].astype(str).str.replace(',', '.')
                 df["Quant OP (kg)"] = pd.to_numeric(df["Quant OP (kg)"], errors='coerce').fillna(0.0)
             return df
         except:
-            return pd.DataFrame(columns=["Tipo", "Cor", "Pigmento", "Quant OP (kg)"])
-    return pd.DataFrame(columns=["Tipo", "Cor", "Pigmento", "Quant OP (kg)"])
+            return pd.DataFrame()
+    return pd.DataFrame()
+
+def atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_total):
+    """Atualiza a Aba Mestra e alimenta a nova Aba Padrões"""
+    padroes_file = "Padroes_Registrados.csv"
+    novos_registros_padrao = []
+    data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    for item in lista_lote:
+        # Cálculo do coeficiente
+        novo_coef = (item["Quant ad (g_num)"] / 1000) / vol_total if vol_total > 0 else 0
+        
+        # 1. ATUALIZAÇÃO DA ABA MESTRA
+        mask = (df_mestra['Tipo'] == item["tipo de produto"]) & \
+               (df_mestra['Cor'] == item["cor"]) & \
+               (df_mestra['Pigmento'] == item["pigmento"])
+        
+        if mask.any():
+            if item["Quant ad (g_num)"] <= 0:
+                df_mestra = df_mestra.drop(df_mestra[mask].index)
+            else:
+                df_mestra.loc[mask, 'Quant OP (kg)'] = novo_coef
+        
+        # 2. PREPARAÇÃO PARA A ABA PADRÕES
+        novos_registros_padrao.append({
+            "Data Alteração": data_atual,
+            "Produto": item["tipo de produto"],
+            "Cor": item["cor"],
+            "Pigmento": item["pigmento"],
+            "Novo Coef (kg/L)": novo_coef,
+            "Lote Origem": item["lote"]
+        })
+
+    # Salva Aba Mestra
+    df_mestra.to_csv("Aba_Mestra.csv", index=False, encoding='latin-1')
+    
+    # Salva/Atualiza Aba Padrões
+    df_p = pd.DataFrame(novos_registros_padrao)
+    if os.path.exists(padroes_file):
+        hist_p = pd.read_csv(padroes_file, encoding='latin-1', sep=';')
+        df_p = pd.concat([hist_p, df_p], ignore_index=True)
+    df_p.to_csv(padroes_file, index=False, sep=';', encoding='latin-1')
+    
+    return df_mestra
 
 def salvar_no_historico(dados_lista):
     hist_path = "Historico_Producao.csv"
+    processados = []
     for i, item in enumerate(dados_lista):
-        item["Quantidade OP"] = format_excel_num(item["Quantidade OP"])
-        item["Quant ad (g)"] = format_excel_num(item["Quant ad (g)"])
+        temp = item.copy()
+        temp["Quantidade OP"] = format_excel_num(temp["Quantidade OP"])
+        temp["Quant ad (g)"] = format_excel_num(temp["Quant ad (g)"])
         if i == 0:
-            item["#Plan"] = format_excel_num(item["#Plan"])
-            item["#Real"] = format_excel_num(item["#Real"])
-            item["Litros/Unit"] = format_excel_num(item["Litros/Unit"])
+            temp["#Plan"] = format_excel_num(temp["#Plan"])
+            temp["#Real"] = format_excel_num(temp["#Real"])
+            temp["Litros/Unit"] = format_excel_num(temp["Litros/Unit"])
         else:
-            item["#Plan"] = ""; item["#Real"] = ""; item["Litros/Unit"] = ""
+            temp["#Plan"] = ""; temp["#Real"] = ""; temp["Litros/Unit"] = ""
+        if "Quant ad (g_num)" in temp: del temp["Quant ad (g_num)"]
+        processados.append(temp)
 
-    novo_df = pd.DataFrame(dados_lista)
+    novo_df = pd.DataFrame(processados)
     colunas_excel = ["data", "lote", "tipo de produto", "cor", "pigmento", "toque", "Quant ad (g)", "Quantidade OP", "#Plan", "#Real", "Encomenda?", "Litros/Unit"]
     
     if os.path.exists(hist_path):
-        try:
-            hist_existente = pd.read_csv(hist_path, encoding='latin-1', sep=';')
-            hist_final = pd.concat([hist_existente, novo_df[colunas_excel]], ignore_index=True)
-        except:
-            hist_final = novo_df[colunas_excel]
+        hist_existente = pd.read_csv(hist_path, encoding='latin-1', sep=';')
+        hist_final = pd.concat([hist_existente, novo_df[colunas_excel]], ignore_index=True)
     else:
         hist_final = novo_df[colunas_excel]
     hist_final.to_csv(hist_path, index=False, sep=';', encoding='latin-1')
 
-df_mestra = load_data()
-
-# --- NAVEGAÇÃO ---
-aba = st.sidebar.radio("Navegação:", ["🚀 Nova Pigmentação", "📜 Banco de Dados", "➕ Cadastro", "📊 Aba Mestra"])
+# --- INÍCIO APP ---
+df_mestra = load_data("Aba_Mestra.csv")
+aba = st.sidebar.radio("Navegação:", ["🚀 Nova Pigmentação", "📋 Padrões", "📜 Banco de Dados", "➕ Cadastro", "📊 Aba Mestra"])
 
 if aba == "🚀 Nova Pigmentação":
     st.title("🚀 Registrar Produção")
     
     if df_mestra.empty:
-        st.warning("Aba Mestra vazia. Vá em 'Cadastro' primeiro.")
+        st.warning("Aba Mestra vazia.")
     else:
         c1, c2, c3, c4 = st.columns([1.5, 1.5, 1, 1])
         with c1: tipo_sel = st.selectbox("Produto", df_mestra['Tipo'].unique())
@@ -88,7 +128,6 @@ if aba == "🚀 Nova Pigmentação":
         with c4: encomenda = st.selectbox("📦 Encomenda?", ["Não", "Sim"])
 
         st.markdown("---")
-        
         u1, u2, u3 = st.columns([1, 1, 2])
         with u1: num_plan = st.number_input("#Unid Plan", min_value=1, step=1, value=None)
         with u2: num_real = st.number_input("#Unid Real", min_value=1, step=1, value=None)
@@ -113,7 +152,6 @@ if aba == "🚀 Nova Pigmentação":
                 
                 with st.container():
                     col_pigm, col_espaco, col_pesagem = st.columns([1.2, 0.3, 3.5])
-                    
                     with col_pigm:
                         st.markdown(f"### {pigm}")
                         st.caption(f"Sugestão: {rec_g}g")
@@ -132,49 +170,50 @@ if aba == "🚀 Nova Pigmentação":
                     lista_lote.append({
                         "data": datetime.now().strftime("%d/%m/%Y"), "lote": lote_id, "tipo de produto": tipo_sel,
                         "cor": cor_sel, "pigmento": pigm, "toque": n_toques, "Quantidade OP": rec_g, 
-                        "Quant ad (g)": soma_adicionada, "#Plan": num_plan, "#Real": num_real, 
-                        "Encomenda?": encomenda, "Litros/Unit": litros_unit
+                        "Quant ad (g)": soma_adicionada, "Quant ad (g_num)": soma_adicionada,
+                        "#Plan": num_plan, "#Real": num_real, "Encomenda?": encomenda, "Litros/Unit": litros_unit
                     })
                     st.markdown("<hr>", unsafe_allow_html=True)
+            
+            marcar_novo_padrao = st.checkbox("⚠️ Definir como NOVO PADRÃO? (Atualiza Aba Mestra e Aba Padrões)")
             
             if st.button("✅ FINALIZAR E SALVAR REGISTRO", use_container_width=True):
                 if not lote_id or not num_plan:
                     st.error("Preencha Lote e Unidades!")
                 else:
+                    if marcar_novo_padrao:
+                        df_mestra = atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_plan_tot)
+                        st.warning("Padrão atualizado em todas as bases!")
+                    
                     salvar_no_historico(lista_lote)
-                    st.success("Salvo com sucesso!")
+                    st.success("Registro concluído!")
                     st.balloons()
 
+elif aba == "📋 Padrões":
+    st.title("📋 Histórico de Evolução de Padrões")
+    if os.path.exists("Padroes_Registrados.csv"):
+        df_p = pd.read_csv("Padroes_Registrados.csv", sep=';', encoding='latin-1')
+        st.write("Estes são os produtos que sofreram atualização de padrão via produção:")
+        st.dataframe(df_p, use_container_width=True)
+    else:
+        st.info("Nenhum padrão foi atualizado via produção ainda.")
+
 elif aba == "📜 Banco de Dados":
-    st.title("📜 Histórico de Produção")
+    st.title("📜 Histórico Geral")
     if os.path.exists("Historico_Producao.csv"):
         df_hist = pd.read_csv("Historico_Producao.csv", sep=';', encoding='latin-1')
         st.dataframe(df_hist, use_container_width=True)
-        csv = df_hist.to_csv(index=False, sep=';', encoding='latin-1').encode('latin-1')
-        st.download_button("📥 Baixar CSV para Excel", csv, "Producao_2026.csv", "text/csv")
-    else:
-        st.info("Nenhum registro encontrado no histórico.")
+    else: st.info("Vazio.")
 
 elif aba == "➕ Cadastro":
-    st.title("➕ Cadastro de Aba Mestra")
-    with st.form("cad_novo"):
-        t = st.text_input("Tipo de Produto")
-        c = st.text_input("Cor")
-        p = st.text_input("Pigmento")
-        q = st.number_input("Formulação (kg por 1L)", format="%.8f", value=None)
+    st.title("➕ Cadastro Manual")
+    with st.form("cad"):
+        t = st.text_input("Produto"); c = st.text_input("Cor"); p = st.text_input("Pigmento")
+        q = st.number_input("kg/1L", format="%.8f", value=None)
         if st.form_submit_button("Salvar"):
-            if t and c and p and q:
-                novo = pd.DataFrame([{"Tipo": t, "Cor": c, "Pigmento": p, "Quant OP (kg)": q}])
-                df_final = pd.concat([df_mestra, novo], ignore_index=True)
-                df_final.to_csv("Aba_Mestra.csv", index=False, encoding='latin-1')
-                st.success("Cadastrado com sucesso!")
-                st.rerun()
-            else:
-                st.error("Preencha todos os campos!")
+            pd.concat([df_mestra, pd.DataFrame([{"Tipo": t, "Cor": c, "Pigmento": p, "Quant OP (kg)": q}])], ignore_index=True).to_csv("Aba_Mestra.csv", index=False, encoding='latin-1')
+            st.success("Cadastrado!"); st.rerun()
 
 elif aba == "📊 Aba Mestra":
-    st.title("📊 Consulta Aba Mestra")
-    if not df_mestra.empty:
-        st.dataframe(df_mestra, use_container_width=True)
-    else:
-        st.info("Aba Mestra está vazia.")
+    st.title("📊 Consulta Aba Mestra (Atual)")
+    st.dataframe(df_mestra, use_container_width=True)
