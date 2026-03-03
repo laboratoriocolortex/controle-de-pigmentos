@@ -4,6 +4,7 @@ import os
 from datetime import datetime
 import numpy as np
 
+# Configuração inicial da página
 st.set_page_config(page_title="Controle 2026", layout="wide", page_icon="🧪")
 
 # --- ESTILO CSS ---
@@ -23,7 +24,7 @@ st.markdown("""
 def format_num_padrao(valor, casas=2):
     if valor is None or valor == "": return ""
     try:
-        val_float = float(valor)
+        val_float = float(str(valor).replace(',', '.'))
         return f"{val_float:.{casas}f}"
     except:
         return str(valor)
@@ -102,8 +103,8 @@ if aba == "🚀 Nova Pigmentação":
     if df_mestra.empty: st.warning("Aba Mestra vazia.")
     else:
         c1, c2, c3, c4 = st.columns([1.5, 1.5, 1, 1])
-        with c1: tipo_sel = st.selectbox("Produto", df_mestra['Tipo'].unique())
-        with c2: cor_sel = st.selectbox("Cor", df_mestra[df_mestra['Tipo'] == tipo_sel]['Cor'].unique())
+        with c1: tipo_sel = st.selectbox("Produto", sorted(df_mestra['Tipo'].unique()))
+        with c2: cor_sel = st.selectbox("Cor", sorted(df_mestra[df_mestra['Tipo'] == tipo_sel]['Cor'].unique()))
         with c3: lote_id = st.text_input("Lote", value="", placeholder="Nº Lote")
         with c4: encomenda = st.selectbox("📦 Encomenda?", ["Não", "Sim"])
         st.markdown("---")
@@ -164,41 +165,54 @@ elif aba == "📈 Variações & CEP":
         for c in ["Quant ad (g)", "Quantidade OP", "#Plan", "#Real", "Litros/Unit"]:
             df_h[c] = pd.to_numeric(df_h[c].astype(str).str.replace(',','.'), errors='coerce')
         
-        # Correção para Python 3.13 (ffill)
         df_h[['#Plan','#Real','Litros/Unit']] = df_h[['#Plan','#Real','Litros/Unit']].ffill()
-        
         df_h['Vol_Real'] = df_h['#Real'] * df_h['Litros/Unit']
         df_h['Vol_Plan'] = df_h['#Plan'] * df_h['Litros/Unit']
         df_h = df_h[df_h['Vol_Real'] > 0].copy()
-        df_h['Desvio_%'] = (((df_h['Quant ad (g)']/df_h['Vol_Real']) / (df_h['Quantidade OP']/df_h['Vol_Plan'])) - 1) * 100
+        df_h['Desvio_%'] = (((df_h['Quant ad (g)']/df_h['Vol_Real']) / (df_h['Quantidade OP']/(df_h['Vol_Plan'] + 0.0001))) - 1) * 100
 
-        p_sel = st.selectbox("Produto", df_h['tipo de produto'].unique())
-        c_sel = st.selectbox("Cor", df_h[df_h['tipo de produto']==p_sel]['cor'].unique())
+        p_sel = st.selectbox("Produto", sorted(df_h['tipo de produto'].unique()))
+        c_sel = st.selectbox("Cor", sorted(df_h[df_h['tipo de produto']==p_sel]['cor'].unique()))
         df_f = df_h[(df_h['tipo de produto']==p_sel) & (df_h['cor']==c_sel)]
 
         if not df_f.empty:
             m1, m2 = st.columns(2)
             m1.metric("Desvio Médio", f"{df_f['Desvio_%'].mean():.2f}%")
-            m2.metric("Estabilidade (Desvio Padrão)", f"{df_f['Desvio_%'].std():.2f}%")
+            m2.metric("Estabilidade (DP)", f"{df_f['Desvio_%'].std():.2f}%")
             
             st.subheader("Linha do Tempo de Desvios (%)")
-            # Gráfico Nativo do Streamlit (Não precisa de biblioteca externa)
             chart_data = df_f.pivot_table(index='data', columns='pigmento', values='Desvio_%')
             st.line_chart(chart_data)
-            
             st.dataframe(df_f[['data','lote','pigmento','Desvio_%']].style.format({"Desvio_%": "{:.2f}%"}), use_container_width=True)
     else: st.info("Sem dados.")
+
+elif aba == "📜 Banco de Dados":
+    st.title("📜 Recuperação e Histórico")
+    with st.expander("🔄 Importar Planilha de Acompanhamento (Correção de Colunas)"):
+        uploaded_file = st.file_uploader("Escolha o arquivo CSV", type="csv")
+        if uploaded_file is not None:
+            try:
+                df_upload = pd.read_csv(uploaded_file, sep=';', encoding='latin-1')
+                df_upload.columns = [c.strip() for c in df_upload.columns]
+                ordem_correta = ["data", "lote", "tipo de produto", "cor", "pigmento", "toque", "Quant ad (g)", "Quantidade OP", "#Plan", "#Real", "Encomenda?", "Litros/Unit"]
+                col_faltantes = [c for c in ordem_correta if c not in df_upload.columns]
+                if col_faltantes: st.error(f"Faltam colunas: {col_faltantes}")
+                else:
+                    df_final = df_upload[ordem_correta]
+                    if st.button("Confirmar Importação"):
+                        df_final.to_csv("Historico_Producao.csv", index=False, sep=';', encoding='latin-1')
+                        st.success("✅ Recuperado!"); st.rerun()
+            except Exception as e: st.error(f"Erro: {e}")
+
+    st.markdown("---")
+    if os.path.exists("Historico_Producao.csv"):
+        st.dataframe(pd.read_csv("Historico_Producao.csv", sep=';', encoding='latin-1'), use_container_width=True)
 
 elif aba == "📋 Padrões":
     st.title("📋 Evolução de Padrões")
     if os.path.exists("Padroes_Registrados.csv"):
         df_p = pd.read_csv("Padroes_Registrados.csv", sep=';', encoding='latin-1')
         st.dataframe(df_p.style.format({"Novo Coef (kg/L)": "{:.6f}"}), use_container_width=True)
-
-elif aba == "📜 Banco de Dados":
-    st.title("📜 Histórico Geral")
-    if os.path.exists("Historico_Producao.csv"):
-        st.dataframe(pd.read_csv("Historico_Producao.csv", sep=';', encoding='latin-1'), use_container_width=True)
 
 elif aba == "➕ Cadastro":
     st.title("➕ Cadastro Manual")
