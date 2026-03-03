@@ -185,18 +185,13 @@ elif aba == "📈 Variações & CEP":
             m3.metric("Status", "✅ Estável" if abs(df_f['Desvio_%'].mean()) < 10 else "⚠️ Revisar Padrão")
             
             st.subheader("Análise de Desvio vs Limites (+/- 10%)")
-            
-            # Pivot dos dados para o gráfico
             chart_data = df_f.pivot_table(index='data', columns='pigmento', values='Desvio_%')
-            
-            # Adicionando Linhas de Referência
             chart_data['Meta (Mestra)'] = 0.0
             chart_data['Limite Sup (+10%)'] = 10.0
             chart_data['Limite Inf (-10%)'] = -10.0
             
-            # Gráfico Nativo (Cores automáticas para evitar StreamlitColorLengthError)
             st.line_chart(chart_data) 
-            st.caption("Verifique a legenda: Linha 0% é a meta. Limites em +10% e -10%.")
+            st.caption("Meta: Linha em 0%. Tolerância: Entre -10% e +10%.")
 
             st.subheader("📋 Detalhamento Comparativo")
             def color_desvio(val):
@@ -208,27 +203,22 @@ elif aba == "📈 Variações & CEP":
                 "Real (g/L)": "{:.3f}",
                 "Desvio_%": "{:.2f}%"
             }).map(color_desvio, subset=['Desvio_%']), use_container_width=True)
-    else: st.info("Sem dados históricos para análise.")
 
 elif aba == "📜 Banco de Dados":
     st.title("📜 Recuperação e Histórico")
-    with st.expander("🔄 Importar Planilha de Acompanhamento (Correção de Colunas)"):
+    with st.expander("🔄 Importar Planilha de Acompanhamento"):
         uploaded_file = st.file_uploader("Escolha o arquivo CSV", type="csv")
         if uploaded_file is not None:
             try:
                 df_upload = pd.read_csv(uploaded_file, sep=';', encoding='latin-1')
                 df_upload.columns = [c.strip() for c in df_upload.columns]
                 ordem_correta = ["data", "lote", "tipo de produto", "cor", "pigmento", "toque", "Quant ad (g)", "Quantidade OP", "#Plan", "#Real", "Encomenda?", "Litros/Unit"]
-                col_faltantes = [c for c in ordem_correta if c not in df_upload.columns]
-                if col_faltantes: st.error(f"Faltam colunas: {col_faltantes}")
-                else:
-                    df_final = df_upload[ordem_correta]
-                    if st.button("Confirmar Importação"):
-                        df_final.to_csv("Historico_Producao.csv", index=False, sep=';', encoding='latin-1')
-                        st.success("✅ Histórico restaurado!"); st.rerun()
+                df_final = df_upload[ordem_correta]
+                if st.button("Confirmar Importação"):
+                    df_final.to_csv("Historico_Producao.csv", index=False, sep=';', encoding='latin-1')
+                    st.success("✅ Histórico restaurado!"); st.rerun()
             except Exception as e: st.error(f"Erro: {e}")
 
-    st.markdown("---")
     if os.path.exists("Historico_Producao.csv"):
         st.dataframe(pd.read_csv("Historico_Producao.csv", sep=';', encoding='latin-1'), use_container_width=True)
 
@@ -249,5 +239,24 @@ elif aba == "➕ Cadastro":
             st.success("Salvo!"); st.rerun()
 
 elif aba == "📊 Aba Mestra":
+    st.title("📊 Editor da Aba Mestra")
+    st.markdown("Clique em qualquer célula para editar. Não esqueça de salvar!")
+    if not df_mestra.empty:
+        df_editado = st.data_editor(
+            df_mestra, 
+            num_rows="dynamic", 
+            use_container_width=True,
+            column_config={
+                "Quant OP (kg)": st.column_config.NumberColumn(format="%.6f")
+            }
+        )
+        if st.button("💾 SALVAR ALTERAÇÕES"):
+            df_editado.to_csv("Aba_Mestra.csv", index=False, encoding='latin-1')
+            st.success("Alterações salvas com sucesso!")
+            st.rerun()
+    else:
+        st.info("Aba Mestra vazia.")
+elif aba == "📊 Aba Mestra":
     st.title("📊 Aba Mestra Atual")
     st.dataframe(df_mestra.style.format({"Quant OP (kg)": "{:.6f}"}), use_container_width=True)
+
