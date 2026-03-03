@@ -93,7 +93,7 @@ def salvar_no_historico(dados_lista):
     else: final = novo_df[col_excel]
     final.to_csv(hist_path, index=False, sep=';', encoding='latin-1')
 
-# --- INÍCIO APP ---
+# --- NAVEGAÇÃO ---
 df_mestra = load_data("Aba_Mestra.csv")
 menu = ["🚀 Nova Pigmentação", "📈 Variações & CEP", "📋 Padrões", "📜 Banco de Dados", "➕ Cadastro", "📊 Aba Mestra"]
 aba = st.sidebar.radio("Navegação:", menu)
@@ -159,7 +159,7 @@ if aba == "🚀 Nova Pigmentação":
                     st.success("Salvo!"); st.balloons()
 
 elif aba == "📈 Variações & CEP":
-    st.title("📈 Análise de Variabilidade")
+    st.title("📈 Gráfico de Controle de Processo (CEP)")
     if os.path.exists("Historico_Producao.csv"):
         df_h = pd.read_csv("Historico_Producao.csv", sep=';', encoding='latin-1')
         for c in ["Quant ad (g)", "Quantidade OP", "#Plan", "#Real", "Litros/Unit"]:
@@ -169,22 +169,44 @@ elif aba == "📈 Variações & CEP":
         df_h['Vol_Real'] = df_h['#Real'] * df_h['Litros/Unit']
         df_h['Vol_Plan'] = df_h['#Plan'] * df_h['Litros/Unit']
         df_h = df_h[df_h['Vol_Real'] > 0].copy()
-        df_h['Desvio_%'] = (((df_h['Quant ad (g)']/df_h['Vol_Real']) / (df_h['Quantidade OP']/(df_h['Vol_Plan'] + 0.0001))) - 1) * 100
+        
+        df_h['Real (g/L)'] = df_h['Quant ad (g)'] / df_h['Vol_Real']
+        df_h['Padrão Mestra (g/L)'] = (df_h['Quantidade OP'] * 1000) / (df_h['Vol_Plan'] + 0.0001)
+        df_h['Desvio_%'] = ((df_h['Real (g/L)'] / df_h['Padrão Mestra (g/L)']) - 1) * 100
 
-        p_sel = st.selectbox("Produto", sorted(df_h['tipo de produto'].unique()))
-        c_sel = st.selectbox("Cor", sorted(df_h[df_h['tipo de produto']==p_sel]['cor'].unique()))
-        df_f = df_h[(df_h['tipo de produto']==p_sel) & (df_h['cor']==c_sel)]
+        p_sel = st.selectbox("Filtrar Produto", sorted(df_h['tipo de produto'].unique()))
+        c_sel = st.selectbox("Filtrar Cor", sorted(df_h[df_h['tipo de produto']==p_sel]['cor'].unique()))
+        df_f = df_h[(df_h['tipo de produto']==p_sel) & (df_h['cor']==c_sel)].copy()
 
         if not df_f.empty:
-            m1, m2 = st.columns(2)
+            m1, m2, m3 = st.columns(3)
             m1.metric("Desvio Médio", f"{df_f['Desvio_%'].mean():.2f}%")
             m2.metric("Estabilidade (DP)", f"{df_f['Desvio_%'].std():.2f}%")
+            m3.metric("Status", "✅ Estável" if abs(df_f['Desvio_%'].mean()) < 10 else "⚠️ Revisar Padrão")
             
-            st.subheader("Linha do Tempo de Desvios (%)")
+            st.subheader("Análise de Desvio vs Limites (+/- 10%)")
+            
+            # Gráfico de Controle
             chart_data = df_f.pivot_table(index='data', columns='pigmento', values='Desvio_%')
-            st.line_chart(chart_data)
-            st.dataframe(df_f[['data','lote','pigmento','Desvio_%']].style.format({"Desvio_%": "{:.2f}%"}), use_container_width=True)
-    else: st.info("Sem dados.")
+            chart_data['Meta (Mestra)'] = 0.0
+            chart_data['Limite Sup (+10%)'] = 10.0
+            chart_data['Limite Inf (-10%)'] = -10.0
+            
+            # Cores: Verde para meta, Vermelho para limites, Azul/Cores para os pigmentos
+            st.line_chart(chart_data, color=["#2ecc71", "#e74c3c", "#e74c3c"] + ["#3498db", "#9b59b6", "#f1c40f"]) 
+            st.caption("A linha verde (0%) é a meta da Aba Mestra. As linhas vermelhas são o limite de 10%.")
+
+            st.subheader("📋 Detalhamento Comparativo")
+            def color_desvio(val):
+                return 'color: red' if abs(val) > 10 else 'color: black'
+
+            col_view = ['data', 'lote', 'pigmento', 'Padrão Mestra (g/L)', 'Real (g/L)', 'Desvio_%']
+            st.dataframe(df_f[col_view].style.format({
+                "Padrão Mestra (g/L)": "{:.3f}",
+                "Real (g/L)": "{:.3f}",
+                "Desvio_%": "{:.2f}%"
+            }).map(color_desvio, subset=['Desvio_%']), use_container_width=True)
+    else: st.info("Sem dados históricos para análise.")
 
 elif aba == "📜 Banco de Dados":
     st.title("📜 Recuperação e Histórico")
@@ -201,7 +223,7 @@ elif aba == "📜 Banco de Dados":
                     df_final = df_upload[ordem_correta]
                     if st.button("Confirmar Importação"):
                         df_final.to_csv("Historico_Producao.csv", index=False, sep=';', encoding='latin-1')
-                        st.success("✅ Recuperado!"); st.rerun()
+                        st.success("✅ Histórico restaurado!"); st.rerun()
             except Exception as e: st.error(f"Erro: {e}")
 
     st.markdown("---")
@@ -219,10 +241,11 @@ elif aba == "➕ Cadastro":
     with st.form("cad"):
         t = st.text_input("Produto"); c = st.text_input("Cor"); p = st.text_input("Pigmento")
         q = st.number_input("kg/1L", format="%.8f", value=None)
-        if st.form_submit_button("Salvar"):
-            pd.concat([df_mestra, pd.DataFrame([{"Tipo":t,"Cor":c,"Pigmento":p,"Quant OP (kg)":q}])], ignore_index=True).to_csv("Aba_Mestra.csv", index=False, encoding='latin-1')
+        if st.form_submit_button("Salvar na Mestra"):
+            nova_linha = pd.DataFrame([{"Tipo":t,"Cor":c,"Pigmento":p,"Quant OP (kg)":q}])
+            pd.concat([df_mestra, nova_linha], ignore_index=True).to_csv("Aba_Mestra.csv", index=False, encoding='latin-1')
             st.success("Salvo!"); st.rerun()
 
 elif aba == "📊 Aba Mestra":
-    st.title("📊 Aba Mestra")
+    st.title("📊 Aba Mestra Atual")
     st.dataframe(df_mestra.style.format({"Quant OP (kg)": "{:.6f}"}), use_container_width=True)
