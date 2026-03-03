@@ -186,15 +186,17 @@ elif aba == "📈 Variações & CEP":
             
             st.subheader("Análise de Desvio vs Limites (+/- 10%)")
             
-            # Gráfico de Controle
+            # Pivot dos dados para o gráfico
             chart_data = df_f.pivot_table(index='data', columns='pigmento', values='Desvio_%')
+            
+            # Adicionando Linhas de Referência
             chart_data['Meta (Mestra)'] = 0.0
             chart_data['Limite Sup (+10%)'] = 10.0
             chart_data['Limite Inf (-10%)'] = -10.0
             
-            # Cores: Verde para meta, Vermelho para limites, Azul/Cores para os pigmentos
-            st.line_chart(chart_data, color=["#2ecc71", "#e74c3c", "#e74c3c"] + ["#3498db", "#9b59b6", "#f1c40f"]) 
-            st.caption("A linha verde (0%) é a meta da Aba Mestra. As linhas vermelhas são o limite de 10%.")
+            # Gráfico Nativo (Cores automáticas para evitar StreamlitColorLengthError)
+            st.line_chart(chart_data) 
+            st.caption("Verifique a legenda: Linha 0% é a meta. Limites em +10% e -10%.")
 
             st.subheader("📋 Detalhamento Comparativo")
             def color_desvio(val):
