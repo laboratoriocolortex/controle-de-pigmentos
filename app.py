@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 from datetime import datetime
-import matplotlib.pyplot as plt
+import numpy as np
 
 st.set_page_config(page_title="Controle 2026", layout="wide", page_icon="🧪")
 
@@ -51,7 +51,6 @@ def atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_plan_calculo, vol_real
         concentracao_real_g_l = item["Quant ad (g_num)"] / vol_real_calculo
         novo_coef = (concentracao_real_g_l / 1000) 
         mask = (df_mestra['Tipo'] == item["tipo de produto"]) & (df_mestra['Cor'] == item["cor"]) & (df_mestra['Pigmento'] == item["pigmento"])
-        
         if mask.any():
             if item["Quant ad (g_num)"] <= 0: df_mestra = df_mestra.drop(df_mestra[mask].index)
             else: df_mestra.loc[mask, 'Quant OP (kg)'] = novo_coef
@@ -62,7 +61,6 @@ def atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_plan_calculo, vol_real
             "Lote Origem": item["lote"], "Qtd Usada Real (g)": format_num_padrao(item["Quant ad (g_num)"], 2),
             "Vol Real (L)": format_num_padrao(vol_real_calculo, 2), "Vol Plan (L)": format_num_padrao(vol_plan_calculo, 2)
         })
-
     df_mestra.to_csv("Aba_Mestra.csv", index=False, encoding='latin-1')
     df_p = pd.DataFrame(novos_registros_padrao)
     if os.path.exists(padroes_file):
@@ -163,10 +161,11 @@ elif aba == "📈 Variações & CEP":
     st.title("📈 Análise de Variabilidade")
     if os.path.exists("Historico_Producao.csv"):
         df_h = pd.read_csv("Historico_Producao.csv", sep=';', encoding='latin-1')
-        # Limpeza e preenchimento para cálculo
         for c in ["Quant ad (g)", "Quantidade OP", "#Plan", "#Real", "Litros/Unit"]:
             df_h[c] = pd.to_numeric(df_h[c].astype(str).str.replace(',','.'), errors='coerce')
-        df_h[['#Plan','#Real','Litros/Unit']] = df_h[['#Plan','#Real','Litros/Unit']].fillna(method='ffill')
+        
+        # Correção para Python 3.13 (ffill)
+        df_h[['#Plan','#Real','Litros/Unit']] = df_h[['#Plan','#Real','Litros/Unit']].ffill()
         
         df_h['Vol_Real'] = df_h['#Real'] * df_h['Litros/Unit']
         df_h['Vol_Plan'] = df_h['#Plan'] * df_h['Litros/Unit']
@@ -180,18 +179,14 @@ elif aba == "📈 Variações & CEP":
         if not df_f.empty:
             m1, m2 = st.columns(2)
             m1.metric("Desvio Médio", f"{df_f['Desvio_%'].mean():.2f}%")
-            m2.metric("Desvio Padrão (Estabilidade)", f"{df_f['Desvio_%'].std():.2f}%")
+            m2.metric("Estabilidade (Desvio Padrão)", f"{df_f['Desvio_%'].std():.2f}%")
             
-            # Gráfico de Variabilidade
-            fig, ax = plt.subplots(figsize=(10, 4))
-            for pig in df_f['pigmento'].unique():
-                temp = df_f[df_f['pigmento']==pig]
-                ax.plot(temp['data'], temp['Desvio_%'], marker='o', label=pig)
-            ax.axhline(0, color='green', linestyle='--')
-            ax.set_ylabel("Desvio %")
-            ax.legend()
-            st.pyplot(fig)
-            st.dataframe(df_f[['data','lote','pigmento','Desvio_%']].style.format({"Desvio_%": "{:.2f}%"}))
+            st.subheader("Linha do Tempo de Desvios (%)")
+            # Gráfico Nativo do Streamlit (Não precisa de biblioteca externa)
+            chart_data = df_f.pivot_table(index='data', columns='pigmento', values='Desvio_%')
+            st.line_chart(chart_data)
+            
+            st.dataframe(df_f[['data','lote','pigmento','Desvio_%']].style.format({"Desvio_%": "{:.2f}%"}), use_container_width=True)
     else: st.info("Sem dados.")
 
 elif aba == "📋 Padrões":
