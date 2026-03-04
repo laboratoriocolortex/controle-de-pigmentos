@@ -42,6 +42,53 @@ def load_data(file="Aba_Mestra.csv"):
             return pd.DataFrame()
     return pd.DataFrame()
 
+# --- NOVA FUNÇÃO DE EXPORTAÇÃO A-Q (EXCLUSIVA PARA BANCO DE DADOS) ---
+def gerar_planilha_controle_completa(df_hist, df_mestra):
+    df = df_hist.copy()
+    # Garante conversão numérica para cálculos
+    for col in ["Quant ad (g)", "Quantidade OP", "#Plan", "#Real", "Litros/Unit"]:
+        df[col] = pd.to_numeric(df[col].astype(str).str.replace(',','.'), errors='coerce')
+    
+    # Preenche dados mestre que ficam vazios nas linhas de pigmentos adicionais
+    df[['#Plan','#Real','Litros/Unit','lote','tipo de produto','cor']] = df[['#Plan','#Real','Litros/Unit','lote','tipo de produto','cor']].ffill()
+    
+    # L e M: Volumes
+    df['Volume Planejado'] = df['#Plan'] * df['Litros/Unit']
+    df['volume produzido'] = df['#Real'] * df['Litros/Unit']
+
+    # N: Busca Formulação na Mestra
+    df = pd.merge(df, df_mestra[['Tipo', 'Cor', 'Pigmento', 'Quant OP (kg)']], 
+                  left_on=['tipo de produto', 'cor', 'pigmento'], 
+                  right_on=['Tipo', 'Cor', 'Pigmento'], how='left')
+    
+    # O, P e Q: Cálculos
+    df['consumo real de pigmento (utilizado kg/L)'] = (df['Quant ad (g)'] / 1000) / df['volume produzido'].replace(0, 1)
+    df['variação percentual'] = (df['consumo real de pigmento (utilizado kg/L)'] / df['Quant OP (kg)_y'].replace(0, np.nan)) - 1
+    df['variação absoluta'] = (df['Quant ad (g)'] / 1000) - (df['volume produzido'] * df['Quant OP (kg)_y'].fillna(0))
+
+    # Mapeamento para os nomes exatos solicitados (A a Q)
+    df = df.rename(columns={
+        'tipo de produto': 'Tipo de Produto',
+        'cor': 'Cor_x', # auxiliar
+        'pigmento': 'pigmento',
+        'toque': 'Toques',
+        'Quantidade OP': 'Quant OP (kg)',
+        '#Plan': 'n_plan',
+        '#Real': 'n_real',
+        'Quant OP (kg)_y': 'Formulação'
+    })
+
+    colunas_final = [
+        'lote', 'Tipo de Produto', 'cor', 'pigmento', 'Toques', 
+        'Quant ad (g)', 'Quant OP (kg)', 'n_plan', 'n_real', 
+        'Litros/Unit', 'Encomenda?', 'Volume Planejado', 
+        'volume produzido', 'Formulação', 
+        'consumo real de pigmento (utilizado kg/L)', 
+        'variação percentual', 'variação absoluta'
+    ]
+    return df[colunas_final]
+
+# (Mantenha as funções atualizar_padroes_e_mestra e salvar_no_historico originais como você enviou)
 def atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_plan_calculo, vol_real_calculo):
     padroes_file = "Padroes_Registrados.csv"
     novos_registros_padrao = []
@@ -98,6 +145,8 @@ df_mestra = load_data("Aba_Mestra.csv")
 menu = ["🚀 Nova Pigmentação", "📈 Variações & CEP", "📋 Padrões", "📜 Banco de Dados", "➕ Cadastro", "📊 Aba Mestra"]
 aba = st.sidebar.radio("Navegação:", menu)
 
+# (Mantenha os blocos if aba == "🚀 Nova Pigmentação" e "📈 Variações & CEP" EXATAMENTE como no seu original)
+
 if aba == "🚀 Nova Pigmentação":
     st.title("🚀 Registrar Produção")
     if df_mestra.empty: st.warning("Aba Mestra vazia.")
@@ -134,7 +183,6 @@ if aba == "🚀 Nova Pigmentação":
                         st.caption(f"Sugestão OP: {rec_g}g")
                         n_toques = st.number_input(f"Toques", min_value=1, value=1, step=1, key=f"nt_{index}")
                     with col_pes:
-                        st.write("Pesagens (g):")
                         soma_ad = 0.0
                         cols_t = st.columns(5)
                         for t in range(1, int(n_toques) + 1):
@@ -159,6 +207,7 @@ if aba == "🚀 Nova Pigmentação":
                     st.success("Salvo!"); st.balloons()
 
 elif aba == "📈 Variações & CEP":
+    # Mantenha exatamente o seu código original aqui
     st.title("📈 Gráfico de Controle de Processo (CEP)")
     if os.path.exists("Historico_Producao.csv"):
         df_h = pd.read_csv("Historico_Producao.csv", sep=';', encoding='latin-1')
@@ -206,6 +255,8 @@ elif aba == "📈 Variações & CEP":
 
 elif aba == "📜 Banco de Dados":
     st.title("📜 Recuperação e Histórico")
+    
+    # Seção de Importação Original
     with st.expander("🔄 Importar Planilha de Acompanhamento"):
         uploaded_file = st.file_uploader("Escolha o arquivo CSV", type="csv")
         if uploaded_file is not None:
@@ -219,9 +270,36 @@ elif aba == "📜 Banco de Dados":
                     st.success("✅ Histórico restaurado!"); st.rerun()
             except Exception as e: st.error(f"Erro: {e}")
 
+    # EXIBIÇÃO TRANSFORMADA PARA A-Q
     if os.path.exists("Historico_Producao.csv"):
-        st.dataframe(pd.read_csv("Historico_Producao.csv", sep=';', encoding='latin-1'), use_container_width=True)
+        df_base = pd.read_csv("Historico_Producao.csv", sep=';', encoding='latin-1')
+        
+        st.subheader("📊 Visualização de Controle (A até Q)")
+        try:
+            # Chama a função que gera as colunas automáticas L até Q
+            df_aq = gerar_planilha_controle_completa(df_base, df_mestra)
+            
+            st.dataframe(df_aq.style.format({
+                "variação percentual": "{:.2%}",
+                "consumo real de pigmento (utilizado kg/L)": "{:.6f}",
+                "variação absoluta": "{:.3f} kg",
+                "Formulação": "{:.6f}"
+            }), use_container_width=True)
 
+            # Botão para baixar exatamente o formato A-Q
+            csv_data = df_aq.to_csv(index=False, sep=';', decimal=',', encoding='latin-1').encode('latin-1')
+            st.download_button(
+                label="📥 Baixar Planilha de Controle (A-Q)",
+                data=csv_data,
+                file_name=f"Controle_Pigmentos_AQ_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
+        except Exception as e:
+            st.error(f"Erro ao processar colunas automáticas: {e}")
+            st.info("Exibindo dados brutos:")
+            st.dataframe(df_base)
+
+# (Mantenha as abas Padrões, Cadastro e Aba Mestra originais)
 elif aba == "📋 Padrões":
     st.title("📋 Evolução de Padrões")
     if os.path.exists("Padroes_Registrados.csv"):
@@ -240,22 +318,8 @@ elif aba == "➕ Cadastro":
 
 elif aba == "📊 Aba Mestra":
     st.title("📊 Editor da Aba Mestra")
-    st.markdown("Clique em qualquer célula para editar. Não esqueça de salvar!")
     if not df_mestra.empty:
-        df_editado = st.data_editor(
-            df_mestra, 
-            num_rows="dynamic", 
-            use_container_width=True,
-            column_config={
-                "Quant OP (kg)": st.column_config.NumberColumn(format="%.6f")
-            }
-        )
+        df_editado = st.data_editor(df_mestra, num_rows="dynamic", use_container_width=True)
         if st.button("💾 SALVAR ALTERAÇÕES"):
             df_editado.to_csv("Aba_Mestra.csv", index=False, encoding='latin-1')
-            st.success("Alterações salvas com sucesso!")
-            st.rerun()
-    else:
-        st.info("Aba Mestra vazia.")
-elif aba == "📊 Aba Mestra":
-    st.title("📊 Aba Mestra Atual")
-    st.dataframe(df_mestra.style.format({"Quant OP (kg)": "{:.6f}"}), use_container_width=True)
+            st.success("Alterações salvas!"); st.rerun()
