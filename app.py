@@ -4,258 +4,180 @@ import os
 from datetime import datetime
 import numpy as np
 
-# Configuração inicial da página
-st.set_page_config(page_title="Controle 2026", layout="wide", page_icon="🧪")
+# 1. CONFIGURAÇÃO DA PÁGINA
+st.set_page_config(page_title="Controle de Produção 2026", layout="wide", page_icon="🧪")
 
 # --- ESTILO CSS ---
 st.markdown("""
     <style>
+    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; border: 1px solid #dce1e6; }
     div.stButton > button:first-child {
-        background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb;
-        font-weight: bold; width: 100%; height: 3em;
+        background-color: #28a745; color: white; font-weight: bold; height: 3em; border-radius: 8px;
     }
-    .block-container { padding-top: 1.5rem; }
-    h3 { margin-bottom: 0rem !important; font-size: 1.10rem !important; }
-    hr { margin: 0.5rem 0rem !important; }
+    .titulo-secao { color: #1f4e79; font-weight: bold; border-left: 5px solid #1f4e79; padding-left: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNÇÕES AUXILIARES ---
-def format_num_padrao(valor, casas=2):
-    if valor is None or valor == "": return ""
+# 2. FUNÇÕES DE PERSISTÊNCIA DE DADOS
+def inicializar_arquivos():
+    """Garante que os arquivos existam antes de qualquer operação"""
+    if not os.path.exists("Aba_Mestra.csv"):
+        df_m = pd.DataFrame(columns=['Tipo', 'Cor', 'Pigmento', 'Quant OP (kg)'])
+        df_m.to_csv("Aba_Mestra.csv", index=False, encoding='latin-1')
+    
+    # O Histórico é criado automaticamente na primeira gravação se não existir
+
+def load_mestra():
+    inicializar_arquivos()
     try:
-        val_float = float(str(valor).replace(',', '.'))
-        return f"{val_float:.{casas}f}"
+        df = pd.read_csv("Aba_Mestra.csv", encoding='latin-1')
+        df['Quant OP (kg)'] = pd.to_numeric(df['Quant OP (kg)'].astype(str).str.replace(',', '.'), errors='coerce').fillna(0.0)
+        return df
     except:
-        return str(valor)
+        return pd.DataFrame(columns=['Tipo', 'Cor', 'Pigmento', 'Quant OP (kg)'])
 
-def load_data(file="Aba_Mestra.csv"):
-    if os.path.exists(file):
-        try:
-            df = pd.read_csv(file, sep=None, engine='python', encoding='latin-1')
-            df.columns = [str(c).strip() for c in df.columns]
-            if "Quant OP (kg)" in df.columns:
-                df["Quant OP (kg)"] = df["Quant OP (kg)"].astype(str).str.replace(',', '.')
-                df["Quant OP (kg)"] = pd.to_numeric(df["Quant OP (kg)"], errors='coerce').fillna(0.0)
-            return df
-        except:
-            return pd.DataFrame()
-    return pd.DataFrame()
-
-def atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_plan_calculo, vol_real_calculo):
-    padroes_file = "Padroes_Registrados.csv"
-    novos_registros_padrao = []
-    data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
-    if vol_real_calculo <= 0 or vol_plan_calculo <= 0: return df_mestra, False
-
-    for item in lista_lote:
-        concentracao_real_g_l = item["Quant ad (g_num)"] / vol_real_calculo
-        novo_coef = (concentracao_real_g_l / 1000) 
-        mask = (df_mestra['Tipo'] == item["tipo de produto"]) & (df_mestra['Cor'] == item["cor"]) & (df_mestra['Pigmento'] == item["pigmento"])
-        if mask.any():
-            if item["Quant ad (g_num)"] <= 0: df_mestra = df_mestra.drop(df_mestra[mask].index)
-            else: df_mestra.loc[mask, 'Quant OP (kg)'] = novo_coef
-        
-        novos_registros_padrao.append({
-            "Data Alteração": data_atual, "Produto": item["tipo de produto"], "Cor": item["cor"],
-            "Pigmento": item["pigmento"], "Novo Coef (kg/L)": format_num_padrao(novo_coef, 6),
-            "Lote Origem": item["lote"], "Qtd Usada Real (g)": format_num_padrao(item["Quant ad (g_num)"], 2),
-            "Vol Real (L)": format_num_padrao(vol_real_calculo, 2), "Vol Plan (L)": format_num_padrao(vol_plan_calculo, 2)
-        })
-    df_mestra.to_csv("Aba_Mestra.csv", index=False, encoding='latin-1')
-    df_p = pd.DataFrame(novos_registros_padrao)
-    if os.path.exists(padroes_file):
-        hist_p = pd.read_csv(padroes_file, encoding='latin-1', sep=';')
-        df_p = pd.concat([hist_p, df_p], ignore_index=True)
-    df_p.to_csv(padroes_file, index=False, sep=';', encoding='latin-1')
-    return df_mestra, True
-
-def salvar_no_historico(dados_lista):
+def salvar_no_csv_fisico(df_para_salvar):
+    """Função robusta para anexar dados ao CSV sem perder o que já existe"""
     hist_path = "Historico_Producao.csv"
-    processados = []
-    for i, item in enumerate(dados_lista):
-        temp = item.copy()
-        temp["Quantidade OP"] = format_num_padrao(temp["Quantidade OP"])
-        temp["Quant ad (g)"] = format_num_padrao(temp["Quant ad (g)"])
-        if i == 0:
-            temp["#Plan"] = format_num_padrao(temp["#Plan"])
-            temp["#Real"] = format_num_padrao(temp["#Real"])
-            temp["Litros/Unit"] = format_num_padrao(temp["Litros/Unit"])
-        else:
-            temp["#Plan"] = ""; temp["#Real"] = ""; temp["Litros/Unit"] = ""
-        if "Quant ad (g_num)" in temp: del temp["Quant ad (g_num)"]
-        processados.append(temp)
-    novo_df = pd.DataFrame(processados)
-    col_excel = ["data", "lote", "tipo de produto", "cor", "pigmento", "toque", "Quant ad (g)", "Quantidade OP", "#Plan", "#Real", "Encomenda?", "Litros/Unit"]
+    
     if os.path.exists(hist_path):
-        hist_ex = pd.read_csv(hist_path, encoding='latin-1', sep=';')
-        final = pd.concat([hist_ex, novo_df[col_excel]], ignore_index=True)
-    else: final = novo_df[col_excel]
-    final.to_csv(hist_path, index=False, sep=';', encoding='latin-1')
+        try:
+            # Lê o histórico existente
+            df_antigo = pd.read_csv(hist_path, sep=';', encoding='latin-1', decimal=',')
+            # Une com o novo
+            df_completo = pd.concat([df_antigo, df_para_salvar], ignore_index=True)
+        except Exception as e:
+            # Se o arquivo estiver corrompido ou vazio, começa um novo
+            df_completo = df_para_salvar
+    else:
+        df_completo = df_para_salvar
+    
+    # Grava o arquivo fisicamente no disco
+    df_completo.to_csv(hist_path, index=False, sep=';', encoding='latin-1', decimal=',')
+    return True
 
-# --- NAVEGAÇÃO ---
-df_mestra = load_data("Aba_Mestra.csv")
-menu = ["🚀 Nova Pigmentação", "📈 Variações & CEP", "📋 Padrões", "📜 Banco de Dados", "➕ Cadastro", "📊 Aba Mestra"]
+# 3. INTERFACE DE NAVEGAÇÃO
+df_mestra = load_mestra()
+menu = ["🚀 Registrar Lote", "📊 Banco de Dados (A-Q)", "📈 CEP", "⚙️ Configurar Mestra"]
 aba = st.sidebar.radio("Navegação:", menu)
 
-if aba == "🚀 Nova Pigmentação":
-    st.title("🚀 Registrar Produção")
-    if df_mestra.empty: st.warning("Aba Mestra vazia.")
+# --- ABA 1: REGISTRO DE PRODUÇÃO ---
+if aba == "🚀 Registrar Lote":
+    st.title("🚀 Registrar Produção de Lote")
+    
+    if df_mestra.empty:
+        st.warning("⚠️ Cadastre produtos na aba 'Configurar Mestra' primeiro.")
     else:
-        c1, c2, c3, c4 = st.columns([1.5, 1.5, 1, 1])
-        with c1: tipo_sel = st.selectbox("Produto", sorted(df_mestra['Tipo'].unique()))
-        with c2: cor_sel = st.selectbox("Cor", sorted(df_mestra[df_mestra['Tipo'] == tipo_sel]['Cor'].unique()))
-        with c3: lote_id = st.text_input("Lote", value="", placeholder="Nº Lote")
-        with c4: encomenda = st.selectbox("📦 Encomenda?", ["Não", "Sim"])
-        st.markdown("---")
-        u1, u2, u3 = st.columns([1, 1, 2])
-        with u1: num_plan = st.number_input("#Unid Plan", min_value=1, step=1, value=None)
-        with u2: num_real = st.number_input("#Unid Real", min_value=1, step=1, value=None)
-        with u3:
-            opcoes_vol = ["0,9L", "3L", "3,6L", "5kg", "13kg", "15L", "18L", "25kg", "Outro"]
-            sel_vol = st.select_slider("Embalagem:", options=opcoes_vol, value="15L")
-            litros_unit = float(sel_vol.replace('L','').replace('kg','').replace(',','.')) if sel_vol != "Outro" else st.number_input("Valor Unit:", value=None)
-        
-        vol_plan_tot = (num_plan * litros_unit) if (num_plan and litros_unit) else 0
-        vol_real_tot = (num_real * litros_unit) if (num_real and litros_unit) else vol_plan_tot
-        st.info(f"Base Planejada: {vol_plan_tot:.2f}L | Base Real (Envase): {vol_real_tot:.2f}L")
-        
-        st.subheader("🎨 Pigmentos")
-        formulas = df_mestra[(df_mestra['Tipo'] == tipo_sel) & (df_mestra['Cor'] == cor_sel)]
-        if not formulas.empty:
-            lista_lote = []
-            for index, row in formulas.iterrows():
-                pigm = row['Pigmento']
-                rec_g = round(row["Quant OP (kg)"] * vol_plan_tot * 1000, 2)
-                with st.container():
-                    col_p, col_esp, col_pes = st.columns([1.2, 0.3, 3.5])
-                    with col_p:
-                        st.markdown(f"### {pigm}")
-                        st.caption(f"Sugestão OP: {rec_g}g")
-                        n_toques = st.number_input(f"Toques", min_value=1, value=1, step=1, key=f"nt_{index}")
-                    with col_pes:
-                        st.write("Pesagens (g):")
-                        soma_ad = 0.0
-                        cols_t = st.columns(5)
-                        for t in range(1, int(n_toques) + 1):
-                            with cols_t[(t-1)%5]:
-                                val_t = st.number_input(f"T{t}", min_value=0.0, format="%.2f", value=None, key=f"val_{index}_{t}")
-                                if val_t: soma_ad += val_t
-                        st.markdown(f"Total Adicionado: {soma_ad:.2f} g")
-                    lista_lote.append({
-                        "data": datetime.now().strftime("%d/%m/%Y"), "lote": lote_id, "tipo de produto": tipo_sel,
-                        "cor": cor_sel, "pigmento": pigm, "toque": n_toques, "Quantidade OP": rec_g, 
-                        "Quant ad (g)": soma_ad, "Quant ad (g_num)": soma_ad,
-                        "#Plan": num_plan, "#Real": num_real, "Encomenda?": encomenda, "Litros/Unit": litros_unit
-                    })
-                    st.markdown("<hr>", unsafe_allow_html=True)
+        with st.form("form_producao", clear_on_submit=True):
+            c1, c2, c3 = st.columns(3)
+            with c1: t_sel = st.selectbox("Produto", sorted(df_mestra['Tipo'].unique()))
+            with c2: c_sel = st.selectbox("Cor", sorted(df_mestra[df_mestra['Tipo'] == t_sel]['Cor'].unique()))
+            with c3: lote_id = st.text_input("Número do Lote")
+
+            c4, c5, c6 = st.columns(3)
+            # NOVO: Opção para registrar a data de produção manual
+            with c4: data_prod = st.date_input("Data de Produção", datetime.now())
+            with c5: n_p = st.number_input("# Plan (Unid)", min_value=1, value=1)
+            with c6: n_r = st.number_input("# Real (Unid)", min_value=1, value=1)
             
-            marcar_p = st.checkbox("⚠️ Atualizar Padrão Técnico?")
-            if st.button("✅ FINALIZAR REGISTRO", use_container_width=True):
-                if not lote_id or not num_plan: st.error("Preencha Lote e Planejado!")
+            lit = st.number_input("Litros por Unidade (Ex: 15.0)", value=15.0)
+            
+            st.markdown("---")
+            formulas = df_mestra[(df_mestra['Tipo'] == t_sel) & (df_mestra['Cor'] == c_sel)]
+            pesagens = {}
+            
+            for i, row in formulas.iterrows():
+                sugestao = row["Quant OP (kg)"] * n_p * lit * 1000
+                pesagens[i] = st.number_input(f"Peso Real (g) - {row['Pigmento']} [Sugestão: {sugestao:.2f}g]", min_value=0.0, format="%.2f", key=f"input_{i}")
+
+            if st.form_submit_button("SALVAR E CALCULAR"):
+                if not lote_id:
+                    st.error("❌ Erro: O número do lote é obrigatório.")
                 else:
-                    if marcar_p and num_real: atualizar_padroes_e_mestra(df_mestra, lista_lote, vol_plan_tot, vol_real_tot)
-                    salvar_no_historico(lista_lote)
-                    st.success("Salvo!"); st.balloons()
+                    dados_novos = []
+                    vol_plan = n_p * lit
+                    vol_real = n_r * lit
+                    
+                    for i, row in formulas.iterrows():
+                        padrão_kg_l = row["Quant OP (kg)"]
+                        peso_g = pesagens[i]
+                        # Cálculo das colunas técnicas O, P e Q
+                        consumo_real = (peso_g / 1000) / vol_real if vol_real > 0 else 0
+                        var_perc = (consumo_real / padrão_kg_l) - 1 if padrão_kg_l > 0 else 0
+                        var_abs = (peso_g / 1000) - (vol_real * padrão_kg_l)
 
-elif aba == "📈 Variações & CEP":
-    st.title("📈 Gráfico de Controle de Processo (CEP)")
+                        dados_novos.append({
+                            "data": data_prod.strftime("%d/%m/%Y"), # Data escolhida pelo usuário
+                            "lote": lote_id,
+                            "tipo de produto": t_sel,
+                            "cor": c_sel,
+                            "pigmento": row['Pigmento'],
+                            "toque": 1,
+                            "Quant ad (g)": peso_g,
+                            "Quantidade OP": padrão_kg_l * vol_plan * 1000,
+                            "#Plan": n_p,
+                            "#Real": n_r,
+                            "Encomenda?": "Não",
+                            "Litros/Unit": lit,
+                            "Volume Planejado": vol_plan,
+                            "volume produzido": vol_real,
+                            "Formulação": padrão_kg_l,
+                            "consumo real (kg/L)": consumo_real,
+                            "variação %": var_perc,
+                            "variação absoluta": var_abs
+                        })
+                    
+                    if salvar_no_csv_fisico(pd.DataFrame(dados_novos)):
+                        st.success(f"✅ Lote {lote_id} salvo com sucesso no Banco de Dados!")
+                        st.balloons()
+
+# --- ABA 2: BANCO DE DADOS ---
+elif aba == "📊 Banco de Dados (A-Q)":
+    st.title("📜 Histórico de Registros e Cálculos")
+    
     if os.path.exists("Historico_Producao.csv"):
-        df_h = pd.read_csv("Historico_Producao.csv", sep=';', encoding='latin-1')
-        for c in ["Quant ad (g)", "Quantidade OP", "#Plan", "#Real", "Litros/Unit"]:
-            df_h[c] = pd.to_numeric(df_h[c].astype(str).str.replace(',','.'), errors='coerce')
+        # Lê sempre a versão mais recente do arquivo
+        df_h = pd.read_csv("Historico_Producao.csv", sep=';', encoding='latin-1', decimal=',')
         
-        df_h[['#Plan','#Real','Litros/Unit']] = df_h[['#Plan','#Real','Litros/Unit']].ffill()
-        df_h['Vol_Real'] = df_h['#Real'] * df_h['Litros/Unit']
-        df_h['Vol_Plan'] = df_h['#Plan'] * df_h['Litros/Unit']
-        df_h = df_h[df_h['Vol_Real'] > 0].copy()
+        st.markdown("<h3 class='titulo-secao'>Tabela Completa (Colunas A-Q)</h3>", unsafe_allow_html=True)
+        st.dataframe(df_h.style.format({
+            'variação %': '{:.2%}',
+            'consumo real (kg/L)': '{:.6f}',
+            'Formulação': '{:.6f}',
+            'variação absoluta': '{:.3f} kg'
+        }), use_container_width=True)
         
-        df_h['Real (g/L)'] = df_h['Quant ad (g)'] / df_h['Vol_Real']
-        df_h['Padrão Mestra (g/L)'] = (df_h['Quantidade OP'] * 1000) / (df_h['Vol_Plan'] + 0.0001)
-        df_h['Desvio_%'] = ((df_h['Real (g/L)'] / df_h['Padrão Mestra (g/L)']) - 1) * 100
-
-        p_sel = st.selectbox("Filtrar Produto", sorted(df_h['tipo de produto'].unique()))
-        c_sel = st.selectbox("Filtrar Cor", sorted(df_h[df_h['tipo de produto']==p_sel]['cor'].unique()))
-        df_f = df_h[(df_h['tipo de produto']==p_sel) & (df_h['cor']==c_sel)].copy()
-
-        if not df_f.empty:
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Desvio Médio", f"{df_f['Desvio_%'].mean():.2f}%")
-            m2.metric("Estabilidade (DP)", f"{df_f['Desvio_%'].std():.2f}%")
-            m3.metric("Status", "✅ Estável" if abs(df_f['Desvio_%'].mean()) < 10 else "⚠️ Revisar Padrão")
-            
-            st.subheader("Análise de Desvio vs Limites (+/- 10%)")
-            chart_data = df_f.pivot_table(index='data', columns='pigmento', values='Desvio_%')
-            chart_data['Meta (Mestra)'] = 0.0
-            chart_data['Limite Sup (+10%)'] = 10.0
-            chart_data['Limite Inf (-10%)'] = -10.0
-            
-            st.line_chart(chart_data) 
-            st.caption("Meta: Linha em 0%. Tolerância: Entre -10% e +10%.")
-
-            st.subheader("📋 Detalhamento Comparativo")
-            def color_desvio(val):
-                return 'color: red' if abs(val) > 10 else 'color: black'
-
-            col_view = ['data', 'lote', 'pigmento', 'Padrão Mestra (g/L)', 'Real (g/L)', 'Desvio_%']
-            st.dataframe(df_f[col_view].style.format({
-                "Padrão Mestra (g/L)": "{:.3f}",
-                "Real (g/L)": "{:.3f}",
-                "Desvio_%": "{:.2f}%"
-            }).map(color_desvio, subset=['Desvio_%']), use_container_width=True)
-
-elif aba == "📜 Banco de Dados":
-    st.title("📜 Recuperação e Histórico")
-    with st.expander("🔄 Importar Planilha de Acompanhamento"):
-        uploaded_file = st.file_uploader("Escolha o arquivo CSV", type="csv")
-        if uploaded_file is not None:
-            try:
-                df_upload = pd.read_csv(uploaded_file, sep=';', encoding='latin-1')
-                df_upload.columns = [c.strip() for c in df_upload.columns]
-                ordem_correta = ["data", "lote", "tipo de produto", "cor", "pigmento", "toque", "Quant ad (g)", "Quantidade OP", "#Plan", "#Real", "Encomenda?", "Litros/Unit"]
-                df_final = df_upload[ordem_correta]
-                if st.button("Confirmar Importação"):
-                    df_final.to_csv("Historico_Producao.csv", index=False, sep=';', encoding='latin-1')
-                    st.success("✅ Histórico restaurado!"); st.rerun()
-            except Exception as e: st.error(f"Erro: {e}")
-
-    if os.path.exists("Historico_Producao.csv"):
-        st.dataframe(pd.read_csv("Historico_Producao.csv", sep=';', encoding='latin-1'), use_container_width=True)
-
-elif aba == "📋 Padrões":
-    st.title("📋 Evolução de Padrões")
-    if os.path.exists("Padroes_Registrados.csv"):
-        df_p = pd.read_csv("Padroes_Registrados.csv", sep=';', encoding='latin-1')
-        st.dataframe(df_p.style.format({"Novo Coef (kg/L)": "{:.6f}"}), use_container_width=True)
-
-elif aba == "➕ Cadastro":
-    st.title("➕ Cadastro Manual")
-    with st.form("cad"):
-        t = st.text_input("Produto"); c = st.text_input("Cor"); p = st.text_input("Pigmento")
-        q = st.number_input("kg/1L", format="%.8f", value=None)
-        if st.form_submit_button("Salvar na Mestra"):
-            nova_linha = pd.DataFrame([{"Tipo":t,"Cor":c,"Pigmento":p,"Quant OP (kg)":q}])
-            pd.concat([df_mestra, nova_linha], ignore_index=True).to_csv("Aba_Mestra.csv", index=False, encoding='latin-1')
-            st.success("Salvo!"); st.rerun()
-
-elif aba == "📊 Aba Mestra":
-    st.title("📊 Editor da Aba Mestra")
-    st.markdown("Clique em qualquer célula para editar. Não esqueça de salvar!")
-    if not df_mestra.empty:
-        df_editado = st.data_editor(
-            df_mestra, 
-            num_rows="dynamic", 
-            use_container_width=True,
-            column_config={
-                "Quant OP (kg)": st.column_config.NumberColumn(format="%.6f")
-            }
-        )
-        if st.button("💾 SALVAR ALTERAÇÕES"):
-            df_editado.to_csv("Aba_Mestra.csv", index=False, encoding='latin-1')
-            st.success("Alterações salvas com sucesso!")
-            st.rerun()
+        # Botão de Download
+        csv = df_h.to_csv(index=False, sep=';', decimal=',', encoding='latin-1').encode('latin-1')
+        st.download_button("📥 Baixar Planilha Excel", csv, "Historico_Producao.csv", "text/csv")
+        
+        if st.button("🗑️ Limpar Todo o Histórico (CUIDADO)"):
+            if os.path.exists("Historico_Producao.csv"):
+                os.remove("Historico_Producao.csv")
+                st.rerun()
     else:
-        st.info("Aba Mestra vazia.")
-elif aba == "📊 Aba Mestra":
-    st.title("📊 Aba Mestra Atual")
-    st.dataframe(df_mestra.style.format({"Quant OP (kg)": "{:.6f}"}), use_container_width=True)
+        st.info("O arquivo de histórico ainda não existe. Registre o primeiro lote para gerá-lo.")
+
+# --- ABA 3: CEP ---
+elif aba == "📈 CEP":
+    st.title("📈 Análise de Variação (CEP)")
+    if os.path.exists("Historico_Producao.csv"):
+        df_h = pd.read_csv("Historico_Producao.csv", sep=';', encoding='latin-1', decimal=',')
+        p_sel = st.selectbox("Escolha o Produto", df_h['tipo de produto'].unique())
+        df_p = df_h[df_h['tipo de produto'] == p_sel]
+        
+        st.line_chart(df_p.pivot_table(index='lote', columns='pigmento', values='variação %'))
+    else:
+        st.warning("Sem dados para análise.")
+
+# --- ABA 4: CONFIGURAÇÕES ---
+elif aba == "⚙️ Configurar Mestra":
+    st.title("⚙️ Gerenciar Padrões (Aba Mestra)")
+    st.write("Insira os produtos e a gramatura padrão por Litro (kg/L).")
+    
+    df_edit = st.data_editor(df_mestra, num_rows="dynamic", use_container_width=True)
+    
+    if st.button("💾 Salvar Padrões"):
+        df_edit.to_csv("Aba_Mestra.csv", index=False, encoding='latin-1')
+        st.success("Aba Mestra atualizada!")
+        st.rerun()
