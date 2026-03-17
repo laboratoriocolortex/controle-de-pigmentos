@@ -32,7 +32,7 @@ if aba == "🚀 Registrar":
         c1, c2 = st.columns(2)
         with c1:
             # Pegando os nomes das colunas da Mestra
-            prod_sel = st.selectbox("Tipo de Produto", df_mestra['Tipo'].unique())
+            prod_sel = st.selectbox("Tipo de Produto", df_mestra['Tipo de Produto'].unique())
             cor_sel = st.selectbox("Cor", df_mestra[df_mestra['Tipo'] == prod_sel]['Cor'].unique())
         with c2:
             lote_id = st.text_input("Lote")
