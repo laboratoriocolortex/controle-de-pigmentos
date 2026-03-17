@@ -1,3 +1,4 @@
 streamlit
 pandas
 numpy
+pip install st-gsheets-connection
