@@ -3,86 +3,121 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
 
-st.set_page_config(page_title="Controle Colortex", layout="wide")
+# 1. CONFIGURAÇÃO DA PÁGINA
+st.set_page_config(page_title="Controle Colortex 2026", layout="wide")
 
-# URL da sua planilha (Certifique-se de que está como "Editor")
-URL_PLANILHA = "https://docs.google.com/spreadsheets/d/19OfTga1-LFrsYS4PHcdx3nB3EAgf1oviNvp3qIuwtq8/edit#gid=1870828680"
+# URL DA SUA PLANILHA
+URL_PLANILHA = "https://docs.google.com/spreadsheets/d/19OfTga1-LFrsYS4PHcdx3nB3EAgf1oviNvp3qIuwtq8/edit?usp=sharing"
 
+# 2. CONEXÃO COM GOOGLE SHEETS
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Função para carregar a Aba Mestra (Gid 1870828680)
-def load_mestra():
+def carregar_mestra():
+    # Carrega a Aba Mestra (GID 1870828680)
     df = conn.read(spreadsheet=URL_PLANILHA, worksheet="1870828680", ttl=0)
+    # Remove espaços extras nos nomes das colunas para evitar erros
+    df.columns = [str(c).strip() for c in df.columns]
     return df
 
-# Função para carregar o Histórico (Gid 0)
-def load_historico():
+def carregar_controle():
+    # Carrega a primeira aba: "controle" (GID 0)
     df = conn.read(spreadsheet=URL_PLANILHA, worksheet="0", ttl=0)
+    df.columns = [str(c).strip() for c in df.columns]
     return df
 
-df_mestra = load_mestra()
-
-st.sidebar.title("Menu")
-aba = st.sidebar.radio("Selecione:", ["🚀 Registrar", "📊 Histórico"])
-
-if aba == "🚀 Registrar":
-    st.title("Registro de Pigmentação")
+# --- INÍCIO DO APP ---
+try:
+    df_mestra = carregar_mestra()
     
-    with st.form("meu_formulario"):
-        c1, c2 = st.columns(2)
-        with c1:
-            # Pegando os nomes das colunas da Mestra
-            prod_sel = st.selectbox("Tipo de Produto", df_mestra['Tipo de Produto'].unique())
-            cor_sel = st.selectbox("Cor", df_mestra[df_mestra['Tipo de Produto'] == prod_sel]['Cor'].unique())
-        with c2:
-            lote_id = st.text_input("Lote")
-            data_fab = st.date_input("Data de Fabricação")
+    st.sidebar.title("Navegação")
+    aba = st.sidebar.radio("Ir para:", ["🚀 Registrar Produção", "📊 Banco de Dados"])
 
-        st.divider()
+    if aba == "🚀 Registrar Produção":
+        st.title("🚀 Registro de Pigmentação")
         
-        # Filtra os pigmentos para aquele produto/cor
-        formulas = df_mestra[(df_mestra['Tipo de Produto'] == prod_sel) & (df_mestra['Cor'] == cor_sel)]
-        
-        pesos_reais = {}
-        for i, row in formulas.iterrows():
-            pesos_reais[i] = st.number_input(f"Peso Real (g) - {row['Pigmento']}", min_value=0.0)
+        # DEFINIÇÃO DOS NOMES DAS COLUNAS DA MESTRA CONFORME SUA CORREÇÃO
+        col_tipo_mestra = "Tipo de Produto"
+        col_cor_mestra = "Cor"
+        col_pig_mestra = "Pigmento"
+        col_quant_mestra = "Quant OP (kg)"
 
-        # Campos extras que aparecem na sua foto
-        unid_real = st.number_input("#Real (Unidades)", min_value=1, value=1)
-        litros_unid = st.number_input("Litros/Unit", value=15.0)
+        with st.form("form_lote"):
+            c1, c2 = st.columns(2)
+            with c1:
+                # Busca na Mestra usando "Tipo de Produto"
+                t_sel = st.selectbox("Selecione o Produto", sorted(df_mestra[col_tipo_mestra].unique()))
+                c_sel = st.selectbox("Selecione a Cor", sorted(df_mestra[df_mestra[col_tipo_mestra] == t_sel][col_cor_mestra].unique()))
+            with c2:
+                lote_id = st.text_input("Número do Lote")
+                data_fab = st.date_input("Data de Fabricação", datetime.now())
 
-        if st.form_submit_button("Salvar no Google Sheets"):
-            novos_dados = []
+            st.divider()
+            
+            # Filtra a fórmula baseada na seleção
+            formulas = df_mestra[(df_mestra[col_tipo_mestra] == t_sel) & (df_mestra[col_cor_mestra] == c_sel)]
+            
+            # Inputs de Volume
+            v1, v2, v3 = st.columns(3)
+            with v1: n_plan = st.number_input("#Plan", min_value=1, value=1)
+            with v2: n_real = st.number_input("#Real", min_value=1, value=1)
+            with v3: lit_unit = st.number_input("Litros/Unit", value=15.0)
+            
+            st.write("### Registro de Pesagem (g)")
+            pesos_reais = {}
             for i, row in formulas.iterrows():
-                # Fazendo os cálculos A-Q conforme as colunas da sua foto
-                v_real = unid_real * litros_unid
-                cons_real = (pesos_reais[i] / 1000) / v_real if v_real > 0 else 0
-                
-                novos_dados.append({
-                    "data": data_fab.strftime("%d/%m/%Y"),
-                    "lote": lote_id,
-                    "tipo de pr": prod_sel,
-                    "cor": cor_sel,
-                    "pigmento": row['Pigmento'],
-                    "toque": row.get('Toque', 1), # Ajuste se houver coluna toque na mestra
-                    "Quant ad (": pesos_reais[i],
-                    "Quantidade": row['Quant OP (kg)'] * v_real * 1000,
-                    "#Plan": unid_real,
-                    "#Real": unid_real,
-                    "Encomend": "Não",
-                    "Litros/Unit": litros_unid,
-                    # Adicione aqui o restante das colunas M até Q se desejar
-                })
-            
-            # União com o que já existe
-            df_atual = load_historico()
-            df_final = pd.concat([df_atual, pd.DataFrame(novos_dados)], ignore_index=True)
-            
-            # Atualiza a planilha
-            conn.update(spreadsheet=URL_PLANILHA, worksheet="0", data=df_final)
-            st.success("Dados gravados com sucesso!")
+                # Sugestão baseada na formulação unitária da mestra
+                sug_g = row[col_quant_mestra] * n_plan * lit_unit * 1000
+                pesos_reais[i] = st.number_input(f"Quant ad (g) - {row[col_pig_mestra]} (Sugerido: {sug_g:.2f}g)", min_value=0.0, format="%.2f")
 
-elif aba == "📊 Histórico":
-    st.title("Histórico de Produção")
-    df_h = load_historico()
-    st.dataframe(df_h)
+            # BOTÃO DE SUBMISSÃO (Obrigatório para processar o form)
+            submit = st.form_submit_button("SALVAR NA PLANILHA GOOGLE")
+
+            if submit:
+                if not lote_id:
+                    st.error("Por favor, informe o número do lote!")
+                else:
+                    novas_linhas = []
+                    for i, row in formulas.iterrows():
+                        lit_p = n_plan * lit_unit
+                        lit_r = n_real * lit_unit
+                        f_base = row[col_quant_mestra] # Padrão kg/L
+                        util_kgl = (pesos_reais[i] / 1000) / lit_r if lit_r > 0 else 0
+                        
+                        # ESTRUTURA EXATA DAS COLUNAS DA ABA "CONTROLE"
+                        novas_linhas.append({
+                            "Data": data_fab.strftime("%d/%m/%Y"),
+                            "Lote": lote_id,
+                            "Tipo de produto": t_sel,
+                            "Cor": c_sel,
+                            "Pigmento": row[col_pig_mestra],
+                            "Toque": 1,
+                            "Quant ad (g)": pesos_reais[i],
+                            "Quant OP(kg)": f_base * lit_p,
+                            "#Plan": n_plan,
+                            "#Real": n_real,
+                            "Litros/Unit": lit_unit,
+                            "Encomenda?": "Não",
+                            "Litros Planejados": lit_p,
+                            "Litros Produzidos": lit_r,
+                            "Formulação (kg/L)": f_base,
+                            "Utilizado (kg/L)": util_kgl,
+                            "Variação %": (util_kgl / f_base) - 1 if f_base > 0 else 0,
+                            "Variação ABS": (pesos_reais[i]/1000) - (lit_r * f_base)
+                        })
+                    
+                    # Processo de anexar ao histórico existente
+                    df_controle_atual = carregar_controle()
+                    df_final = pd.concat([df_controle_atual, pd.DataFrame(novas_linhas)], ignore_index=True)
+                    
+                    # Atualiza a aba "controle" (Gid 0)
+                    conn.update(spreadsheet=URL_PLANILHA, worksheet="0", data=df_final)
+                    st.success(f"✅ Lote {lote_id} registrado com sucesso!")
+                    st.balloons()
+
+    elif aba == "📊 Banco de Dados":
+        st.title("📊 Histórico (Aba Controle)")
+        st.dataframe(carregar_controle(), use_container_width=True)
+
+except Exception as e:
+    st.error(f"Erro detectado: {e}")
+    st.info("Dica: Verifique se os cabeçalhos da Aba Mestra são: Tipo de Produto, Cor, Pigmento, Quant OP (kg)")
