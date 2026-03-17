@@ -7,7 +7,7 @@ from datetime import datetime
 st.set_page_config(page_title="Controle Colortex 2026", layout="wide")
 
 # URL LIMPA
-URL = "https://docs.google.com/spreadsheets/d/19OfTga1-LFrsYS4PHcdx3nB3EAgf1oviNvp3qIuwtq8/edit?gid=1870828680#gid=1870828680"
+URL = "https://docs.google.com/spreadsheets/d/19OfTga1-LFrsYS4PHcdx3nB3EAgf1oviNvp3qIuwtq8/edit?usp=sharing"
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
