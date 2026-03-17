@@ -41,7 +41,7 @@ if aba == "🚀 Registrar":
         st.divider()
         
         # Filtra os pigmentos para aquele produto/cor
-        formulas = df_mestra[(df_mestra['Tipo'] == prod_sel) & (df_mestra['Cor'] == cor_sel)]
+        formulas = df_mestra[(df_mestra['Tipo de Produto'] == prod_sel) & (df_mestra['Cor'] == cor_sel)]
         
         pesos_reais = {}
         for i, row in formulas.iterrows():
