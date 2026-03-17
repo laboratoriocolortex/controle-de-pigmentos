@@ -3,102 +3,86 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
 
-# 1. CONFIGURAÇÃO DA PÁGINA
-st.set_page_config(page_title="Controle 2026 - Google Sheets", layout="wide")
+st.set_page_config(page_title="Controle Colortex", layout="wide")
 
-# URL DA SUA PLANILHA (PÚBLICA PARA EDIÇÃO)
-url_planilha = "https://docs.google.com/spreadsheets/d/19OfTga1-LFrsYS4PHcdx3nB3EAgf1oviNvp3qIuwtq8/edit#gid=1870828680"
+# URL da sua planilha (Certifique-se de que está como "Editor")
+URL_PLANILHA = "https://docs.google.com/spreadsheets/d/19OfTga1-LFrsYS4PHcdx3nB3EAgf1oviNvp3qIuwtq8/edit#gid=1870828680"
 
-# 2. CONEXÃO COM GOOGLE SHEETS
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-def carregar_mestra():
-    # Lê a aba Mestra
-    df = conn.read(spreadsheet=url_planilha, worksheet="1870828680", ttl="0") # Gid da Aba Mestra
-    df.columns = [str(c).strip() for c in df.columns]
-    # Limpeza de números
-    if "Quant OP (kg)" in df.columns:
-        df["Quant OP (kg)"] = pd.to_numeric(df["Quant OP (kg)"].astype(str).str.replace(',', '.'), errors='coerce').fillna(0.0)
+# Função para carregar a Aba Mestra (Gid 1870828680)
+def load_mestra():
+    df = conn.read(spreadsheet=URL_PLANILHA, worksheet="1870828680", ttl=0)
     return df
 
-def carregar_historico():
-    # Lê a aba de Histórico (Gid 0 geralmente é a primeira aba)
-    try:
-        df = conn.read(spreadsheet=url_planilha, worksheet="0", ttl="0")
-        return df
-    except:
-        return pd.DataFrame()
+# Função para carregar o Histórico (Gid 0)
+def load_historico():
+    df = conn.read(spreadsheet=URL_PLANILHA, worksheet="0", ttl=0)
+    return df
 
-# --- INTERFACE ---
-df_mestra = carregar_mestra()
-menu = ["🚀 Registrar Produção", "📊 Banco de Dados (Sheets)", "📈 CEP"]
-aba = st.sidebar.radio("Menu:", menu)
+df_mestra = load_mestra()
 
-if aba == "🚀 Registrar Produção":
-    st.title("🚀 Registrar Lote no Google Sheets")
+st.sidebar.title("Menu")
+aba = st.sidebar.radio("Selecione:", ["🚀 Registrar", "📊 Histórico"])
+
+if aba == "🚀 Registrar":
+    st.title("Registro de Pigmentação")
     
-    with st.form("registro_lote"):
-        c1, c2, c3 = st.columns(3)
-        with c1: t_sel = st.selectbox("Produto", sorted(df_mestra['Tipo'].unique()))
-        with c2: c_sel = st.selectbox("Cor", sorted(df_mestra[df_mestra['Tipo'] == t_sel]['Cor'].unique()))
-        with c3: lote_id = st.text_input("Número do Lote")
+    with st.form("meu_formulario"):
+        c1, c2 = st.columns(2)
+        with c1:
+            # Pegando os nomes das colunas da Mestra
+            prod_sel = st.selectbox("Tipo de Produto", df_mestra['Tipo'].unique())
+            cor_sel = st.selectbox("Cor", df_mestra[df_mestra['Tipo'] == prod_sel]['Cor'].unique())
+        with c2:
+            lote_id = st.text_input("Lote")
+            data_fab = st.date_input("Data de Fabricação")
 
-        c4, c5, c6 = st.columns(3)
-        with c4: data_fab = st.date_input("Data de Fabricação", datetime.now())
-        with c5: n_p = st.number_input("Unid Plan", min_value=1, value=1)
-        with c6: n_r = st.number_input("Unid Real", min_value=1, value=1)
-        
-        lit_u = st.number_input("Litros Unit", value=15.0)
-        
         st.divider()
-        formulas = df_mestra[(df_mestra['Tipo'] == t_sel) & (df_mestra['Cor'] == c_sel)]
+        
+        # Filtra os pigmentos para aquele produto/cor
+        formulas = df_mestra[(df_mestra['Tipo'] == prod_sel) & (df_mestra['Cor'] == cor_sel)]
+        
         pesos_reais = {}
         for i, row in formulas.iterrows():
-            sugestao = row["Quant OP (kg)"] * n_p * lit_u * 1000
-            pesos_reais[i] = st.number_input(f"Peso Real (g) - {row['Pigmento']} (Sugestão: {sugestao:.2f}g)", key=f"p_{i}", min_value=0.0)
+            pesos_reais[i] = st.number_input(f"Peso Real (g) - {row['Pigmento']}", min_value=0.0)
 
-        if st.form_submit_button("SALVAR NA PLANILHA"):
-            if not lote_id:
-                st.error("Informe o lote!")
-            else:
-                novas_linhas = []
-                for i, row in formulas.iterrows():
-                    v_plan, v_real = n_p * lit_u, n_r * lit_u
-                    cons_real = (pesos_reais[i] / 1000) / v_real if v_real > 0 else 0
-                    var_p = (cons_real / row["Quant OP (kg)"]) - 1 if row["Quant OP (kg)"] > 0 else 0
-                    
-                    novas_linhas.append({
-                        'Data_Fabricacao': data_fab.strftime("%d/%m/%Y"),
-                        'Lote': lote_id, 'Tipo_Produto': t_sel, 'Cor': c_sel, 'Pigmento': row['Pigmento'],
-                        'Toque': 1, 'Quant_ad_g': pesos_reais[i], 
-                        'Quantidade_OP_g': row["Quant OP (kg)"] * v_plan * 1000,
-                        'Unid_Plan': n_p, 'Unid_Real': n_r, 'Encomenda': "Não",
-                        'Litros_Unit': lit_u, 'Vol_Plan': v_plan, 'Vol_Real': v_real,
-                        'Formula_kgL': row["Quant OP (kg)"], 'Consumo_Real_kgL': cons_real,
-                        'Variacao_Perc': var_p, 'Variacao_Abs_kg': (pesos_reais[i]/1000) - (v_real * row["Quant OP (kg)"])
-                    })
+        # Campos extras que aparecem na sua foto
+        unid_real = st.number_input("#Real (Unidades)", min_value=1, value=1)
+        litros_unid = st.number_input("Litros/Unit", value=15.0)
+
+        if st.form_submit_button("Salvar no Google Sheets"):
+            novos_dados = []
+            for i, row in formulas.iterrows():
+                # Fazendo os cálculos A-Q conforme as colunas da sua foto
+                v_real = unid_real * litros_unid
+                cons_real = (pesos_reais[i] / 1000) / v_real if v_real > 0 else 0
                 
-                # BUSCA HISTÓRICO ATUAL, ANEXA E SALVA DE VOLTA
-                df_h_atual = carregar_historico()
-                df_final = pd.concat([df_h_atual, pd.DataFrame(novas_linhas)], ignore_index=True)
-                
-                conn.update(spreadsheet=url_planilha, worksheet="0", data=df_final)
-                st.success("✅ Salvo com sucesso no Google Sheets!")
-                st.balloons()
+                novos_dados.append({
+                    "data": data_fab.strftime("%d/%m/%Y"),
+                    "lote": lote_id,
+                    "tipo de pr": prod_sel,
+                    "cor": cor_sel,
+                    "pigmento": row['Pigmento'],
+                    "toque": row.get('Toque', 1), # Ajuste se houver coluna toque na mestra
+                    "Quant ad (": pesos_reais[i],
+                    "Quantidade": row['Quant OP (kg)'] * v_real * 1000,
+                    "#Plan": unid_real,
+                    "#Real": unid_real,
+                    "Encomend": "Não",
+                    "Litros/Unit": litros_unid,
+                    # Adicione aqui o restante das colunas M até Q se desejar
+                })
+            
+            # União com o que já existe
+            df_atual = load_historico()
+            df_final = pd.concat([df_atual, pd.DataFrame(novos_dados)], ignore_index=True)
+            
+            # Atualiza a planilha
+            conn.update(spreadsheet=URL_PLANILHA, worksheet="0", data=df_final)
+            st.success("Dados gravados com sucesso!")
 
-elif aba == "📊 Banco de Dados (Sheets)":
-    st.title("📊 Dados Sincronizados com Google Sheets")
-    df_h = carregar_historico()
-    if not df_h.empty:
-        st.dataframe(df_h, use_container_width=True)
-    else:
-        st.info("Nenhum dado no Histórico.")
-
-elif aba == "📈 CEP":
-    st.title("📈 CEP - Variação %")
-    df_h = carregar_historico()
-    if not df_h.empty:
-        df_h['Variacao_Perc'] = pd.to_numeric(df_h['Variacao_Perc'].astype(str).str.replace(',', '.'), errors='coerce')
-        p_sel = st.selectbox("Produto", df_h['Tipo_Produto'].unique())
-        df_f = df_h[df_h['Tipo_Produto'] == p_sel]
-        st.line_chart(df_f.pivot_table(index='Lote', columns='Pigmento', values='Variacao_Perc'))
+elif aba == "📊 Histórico":
+    st.title("Histórico de Produção")
+    df_h = load_historico()
+    st.dataframe(df_h)
