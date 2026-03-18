@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import os
+import time
 from datetime import datetime, date
 
 # 1. Configuração de Layout
@@ -34,7 +35,12 @@ def carregar_dados(arquivo):
     except: return pd.DataFrame()
 
 def salvar_csv(df, arquivo):
-    df_save = df.drop(columns=['data_dt', 'toque'], errors='ignore')
+    df_save = df.drop(columns=['data_dt', 'toque'], errors='ignore').copy()
+    
+    # Força 5 casas decimais na OP para evitar notação científica no CSV/Excel
+    if 'Quantidade OP' in df_save.columns:
+        df_save['Quantidade OP'] = pd.to_numeric(df_save['Quantidade OP'], errors='coerce').map('{:.5f}'.format)
+    
     df_save.to_csv(arquivo, index=False, encoding='latin-1')
 
 # --- CARREGAMENTO INICIAL ---
@@ -115,8 +121,11 @@ if aba == "🚀 Produção":
                     novo_padr = pd.DataFrame([{"Data": data_f.strftime("%d/%m/%Y"), "Produto": t_sel, "Cor": cor_sel, "Lote": lote_id, "Status": "Padrão"}])
                     df_padr = pd.concat([df_padr, novo_padr], ignore_index=True)
                     salvar_csv(df_padr, "Padroes_Registrados.csv")
+                
                 st.balloons()
-                st.success("Lote salvo com sucesso!"); st.rerun()
+                st.success("Lote salvo com sucesso!")
+                time.sleep(1.2)
+                st.rerun()
 
 # --- 📈 ABA: GRÁFICOS CEP ---
 elif aba == "📈 Gráficos CEP":
@@ -139,13 +148,29 @@ elif aba == "📈 Gráficos CEP":
         if not df_plot.empty:
             for col in ['Quant ad (g)', 'Quantidade OP']:
                 df_plot[col] = pd.to_numeric(df_plot[col].astype(str).str.replace(',', '.'), errors='coerce').fillna(0.0)
+            
             df_plot['OP_g'] = df_plot['Quantidade OP'] * 1000
             df_plot['Desvio (g)'] = df_plot['Quant ad (g)'] - df_plot['OP_g']
+            
+            st.subheader("Tendência de Desvios (%)")
             st.line_chart(df_plot.assign(Var_Perc=((df_plot['Quant ad (g)']/df_plot['OP_g'].replace(0,np.nan))-1)*100).pivot_table(index='lote', columns='pigmento', values='Var_Perc'))
+            
+            # --- TABELA DE VISUALIZAÇÃO ---
+            st.subheader("📋 Dados Brutos Filtrados")
+            df_cep_table = df_plot.drop(columns=['data_dt', 'OP_g'], errors='ignore').copy()
+            
+            # Formatação específica solicitada
+            if 'Quantidade OP' in df_cep_table.columns:
+                df_cep_table['Quantidade OP'] = df_cep_table['Quantidade OP'].map('{:.5f}'.format)
+            if 'Desvio (g)' in df_cep_table.columns:
+                df_cep_table['Desvio (g)'] = df_cep_table['Desvio (g)'].map('{:.1f}'.format) # Apenas 1 casa decimal
+                
+            st.dataframe(df_cep_table, use_container_width=True)
+            
             csv_data = df_plot.to_csv(index=False).encode('utf-8-sig')
-            st.download_button("📥 Baixar Relatório (CSV)", data=csv_data, file_name=f"Relatorio_CEP.csv", mime="text/csv")
+            st.download_button("📥 Baixar Relatório (CSV)", data=csv_data, file_name=f"CEP_{p_sel}_{cor_sel}.csv", mime="text/csv")
         else:
-            st.warning("Sem dados.")
+            st.warning("Sem registros para os filtros selecionados.")
 
 # --- 📋 ABA: PADRÕES REGISTRADOS ---
 elif aba == "📋 Padrões Registrados":
@@ -158,20 +183,28 @@ elif aba == "📋 Padrões Registrados":
     else:
         st.info("Nenhum padrão registrado.")
 
-# --- 📜 ABA: BANCO DE DADOS (BUSCA + TABELA COMPLETA) ---
+# --- 📜 ABA: BANCO DE DADOS ---
 elif aba == "📜 Banco de Dados":
-    st.title("📜 Histórico e Busca de Padrões")
-    
-    # 1. Painel de Busca para Novo Padrão
+    st.title("📜 Histórico Geral de Produção")
+    if not df_hist.empty:
+        st.subheader("📂 Tabela de Visualização Completa")
+        df_display = df_hist.drop(columns=['data_dt'], errors='ignore').copy()
+        if 'Quantidade OP' in df_display.columns:
+            df_display['Quantidade OP'] = pd.to_numeric(df_display['Quantidade OP'], errors='coerce').map('{:.5f}'.format)
+        st.dataframe(df_display, use_container_width=True)
+    else:
+        st.info("Banco de dados vazio.")
+
+    st.divider()
+
     with st.container():
-        st.subheader("🌟 Registrar Novo Padrão por Lote")
-        lote_busca = st.text_input("Busque pelo número do Lote no histórico:", placeholder="Ex: 2024001")
-        
+        st.subheader("🌟 Definir Novo Padrão via Busca")
+        lote_busca = st.text_input("Digite o Lote para registrar como padrão:", placeholder="Ex: 2024.10")
         if lote_busca:
             resultado = df_hist[df_hist['lote'].astype(str) == lote_busca].drop_duplicates(subset=['lote'])
             if not resultado.empty:
                 row = resultado.iloc[0]
-                st.success(f"Lote encontrado: **{row['tipo de produto']} - {row['cor']}** em {row['data']}")
+                st.success(f"Lote encontrado: **{row['tipo de produto']} - {row['cor']}**")
                 if st.button(f"⭐ Confirmar Lote {lote_busca} como Padrão"):
                     novo_p = pd.DataFrame([{"Data": row['data'], "Produto": row['tipo de produto'], "Cor": row['cor'], "Lote": row['lote'], "Status": "Padrão"}])
                     df_padr = pd.concat([df_padr, novo_p], ignore_index=True).drop_duplicates()
@@ -179,16 +212,6 @@ elif aba == "📜 Banco de Dados":
                     st.toast("Padrão salvo!", icon='⭐')
             else:
                 st.error("Lote não encontrado.")
-    
-    st.divider()
-    
-    # 2. TABELA DE VISUALIZAÇÃO COMPLETA (IMPORTANTE)
-    # Ela está dentro desse expander para você abrir e fechar quando quiser
-    with st.expander("📂 TABELA DE VISUALIZAÇÃO COMPLETA", expanded=False):
-        if not df_hist.empty:
-            st.dataframe(df_hist.drop(columns=['data_dt'], errors='ignore'), use_container_width=True)
-        else:
-            st.info("Banco de dados vazio.")
 
 # --- ➕ ABA: CADASTRO DE PRODUTOS ---
 elif aba == "➕ Cadastro de Produtos":
@@ -201,13 +224,16 @@ elif aba == "➕ Cadastro de Produtos":
                 n = pd.DataFrame([{"Tipo": t.title(), "Cor": cor.title(), "Pigmento": p.title(), "Quant OP (kg)": coef}])
                 df_mestra = pd.concat([df_mestra, n], ignore_index=True)
                 salvar_csv(df_mestra, "Aba_Mestra.csv")
-                st.snow(); st.success("Cadastrado com sucesso!"); st.rerun()
+                st.snow()
+                st.success("Cadastrado!")
+                time.sleep(1.2)
+                st.rerun()
 
 # --- DEMAIS ABAS ---
 elif aba == "📊 Editor Aba Mestra":
     ed = st.data_editor(df_mestra, num_rows="dynamic")
     if st.button("Salvar Alterações"):
-        salvar_csv(ed, "Aba_Mestra.csv"); st.success("Salvo com sucesso!")
+        salvar_csv(ed, "Aba_Mestra.csv"); st.success("Salvo!")
 
 elif aba == "📂 Importar CSV":
     up = st.file_uploader("Selecione o arquivo CSV", type="csv")
