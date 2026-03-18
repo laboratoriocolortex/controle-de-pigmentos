@@ -44,7 +44,7 @@ df_padr = carregar_dados("Padroes_Registrados.csv")
 menu = ["🚀 Produção (Toques)", "📈 Gráficos CEP", "📋 Padrões Registrados", "📜 Banco de Dados", "➕ Cadastro de Produtos", "📊 Editor Aba Mestra", "📂 Importar CSV"]
 aba = st.sidebar.radio("Navegação:", menu)
 
-# --- 🚀 ABA: PRODUÇÃO (RESTAURADO CHECKBOX DE PADRÃO) ---
+# --- 🚀 ABA: PRODUÇÃO ---
 if aba == "🚀 Produção (Toques)":
     st.title("🚀 Registro de Pesagem")
     if df_mestra.empty:
@@ -64,8 +64,8 @@ if aba == "🚀 Produção (Toques)":
             sel_v = st.select_slider("Embalagem:", options=opcoes_v, value="15L")
             litros_u = float(sel_v.replace('L','').replace('kg','').replace(',','.')) if sel_v != "Outro" else st.number_input("Valor Unit:", value=15.0)
         with v4:
-            st.write("") # Espaçador
-            salvar_como_padrao = st.checkbox("🌟 Salvar como novo padrão", help="Marque para registrar este lote na aba de Padrões")
+            st.write("") 
+            salvar_como_padrao = st.checkbox("🌟 Salvar como novo padrão")
 
         vol_p_tot = n_p * litros_u
         formula = df_mestra[(df_mestra['Tipo'] == t_sel) & (df_mestra['Cor'] == cor_sel)]
@@ -100,27 +100,21 @@ if aba == "🚀 Produção (Toques)":
 
         if st.button("💾 SALVAR LOTE"):
             if not lote_id:
-                st.error("Por favor, preencha o número do Lote.")
+                st.error("Preencha o Lote.")
             else:
-                # Salva no Histórico
                 df_hist = pd.concat([df_hist, pd.DataFrame(registros_lote)], ignore_index=True)
                 salvar_csv(df_hist, "Historico_Producao.csv")
-                
-                # Se checkbox marcado, salva nos Padrões
                 if salvar_como_padrao:
-                    novo_padr = pd.DataFrame([{"Data": data_f, "Produto": t_sel, "Cor": cor_sel, "Lote": lote_id, "Status": "Padrão Registrado"}])
+                    novo_padr = pd.DataFrame([{"Data": data_f, "Produto": t_sel, "Cor": cor_sel, "Lote": lote_id, "Status": "Padrão"}])
                     df_padr = pd.concat([df_padr, novo_padr], ignore_index=True)
                     salvar_csv(df_padr, "Padroes_Registrados.csv")
-                    st.success("Lote e Novo Padrão registrados!")
-                else:
-                    st.success("Lote registrado com sucesso!")
-                st.rerun()
+                st.success("Salvo!"); st.rerun()
 
-# --- 📈 ABA: CEP (LÓGICA DE EXCESSO > 10%) ---
+# --- 📈 ABA: CEP (STATUS APENAS EMOJI 🚨 PARA EXCESSO) ---
 elif aba == "📈 Gráficos CEP":
-    st.title("📈 Análise de Precisão (Foco em Excessos)")
+    st.title("📈 Análise de Precisão")
     if df_hist.empty:
-        st.info("Sem dados registrados no histórico.")
+        st.info("Sem dados.")
     else:
         df_cep = df_hist.copy()
         for col in ['Quant ad (g)', 'Quantidade OP']:
@@ -129,16 +123,8 @@ elif aba == "📈 Gráficos CEP":
         df_cep['OP_g'] = df_cep['Quantidade OP'] * 1000
         df_cep['Desvio_%'] = ((df_cep['Quant ad (g)'] / (df_cep['OP_g'].replace(0, np.nan))) - 1) * 100
         
-        # STATUS: ALERTA APENAS PARA EXCESSO > 10%
-        def status_excesso(row):
-            d = row['Desvio_%']
-            if pd.isna(d): return "⚪ s/ Base"
-            if row['Quant ad (g)'] == 0: return "⚠️ NÃO USADO"
-            if d > 10.0:
-                return f"🚨 EXCESSO CRÍTICO (+{d:.1f}%)"
-            return "✅ OK"
-
-        df_cep['Status'] = df_cep.apply(status_excesso, axis=1)
+        # STATUS: APENAS EMOJI 🚨 SE > 10%
+        df_cep['Status'] = df_cep['Desvio_%'].apply(lambda d: "🚨" if d > 10.0 else "✅")
 
         p_sel = st.selectbox("Selecione o Produto", sorted(df_cep['tipo de produto'].unique()))
         c_sel = st.selectbox("Selecione a Cor", sorted(df_cep[df_cep['tipo de produto'] == p_sel]['cor'].unique()))
@@ -148,32 +134,56 @@ elif aba == "📈 Gráficos CEP":
         if not df_plot.empty:
             df_plot['lote'] = df_plot['lote'].astype(str)
             st.line_chart(df_plot.pivot_table(index='lote', columns='pigmento', values='Desvio_%', aggfunc='mean'))
-            
-            st.subheader("📋 Relatório de Conformidade Técnica")
+            st.subheader("📋 Relatório de Pesagem")
             st.dataframe(
                 df_plot[['data', 'lote', 'pigmento', 'Quant ad (g)', 'OP_g', 'Desvio_%', 'Status']].style.format({'Desvio_%': '{:.2f}%'})
-                .applymap(lambda x: 'background-color: #f8d7da; color: #721c24; font-weight: bold' if "🚨" in str(x) else '', subset=['Status'])
             )
-        else:
-            st.warning("Selecione um produto e cor válidos.")
 
-# --- DEMAIS ABAS ---
+# --- 📋 ABA: PADRÕES ---
 elif aba == "📋 Padrões Registrados":
-    st.title("📋 Padrões Registrados por Lote")
+    st.title("📋 Padrões")
     st.dataframe(df_padr, use_container_width=True)
 
+# --- 📂 ABA: IMPORTAR ---
 elif aba == "📂 Importar CSV":
-    st.title("📂 Upload de Dados")
-    up = st.file_uploader("Arquivo CSV", type="csv")
+    st.title("📂 Importar")
+    up = st.file_uploader("Arquivo", type="csv")
     alvo = st.selectbox("Destino", ["Aba_Mestra.csv", "Historico_Producao.csv", "Padroes_Registrados.csv"])
-    if up and st.button("Processar"):
+    if up and st.button("Confirmar"):
         df_imp = pd.read_csv(up, encoding='latin-1', sep=None, engine='python')
-        salvar_csv(df_imp, alvo); st.success("Importado!"); st.rerun()
+        salvar_csv(df_imp, alvo); st.success("Ok!"); st.rerun()
 
+# --- ➕ ABA: CADASTRO DE PRODUTOS (RESTAURADA) ---
+elif aba == "➕ Cadastro de Produtos":
+    st.title("➕ Cadastrar Novo Pigmento na Mestra")
+    with st.form("form_cadastro"):
+        col1, col2 = st.columns(2)
+        with col1:
+            novo_tipo = st.text_input("Tipo de Produto (Ex: Colormax)")
+            novo_pigmento = st.text_input("Nome do Pigmento")
+        with col2:
+            nova_cor = st.text_input("Cor do Produto (Ex: Branco Gelo)")
+            novo_coef = st.number_input("Coeficiente de Dosagem (kg/L)", format="%.6f")
+        
+        if st.form_submit_button("Adicionar à Aba Mestra"):
+            if novo_tipo and nova_cor and novo_pigmento:
+                novo_item = pd.DataFrame([{
+                    "Tipo": novo_tipo.strip().title(),
+                    "Cor": nova_cor.strip().title(),
+                    "Pigmento": novo_pigmento.strip().title(),
+                    "Quant OP (kg)": novo_coef
+                }])
+                df_mestra = pd.concat([df_mestra, novo_item], ignore_index=True)
+                salvar_csv(df_mestra, "Aba_Mestra.csv")
+                st.success(f"Item {novo_pigmento} adicionado com sucesso!")
+            else:
+                st.error("Preencha todos os campos obrigatórios.")
+
+# --- 📊 ABA: EDITOR ---
 elif aba == "📊 Editor Aba Mestra":
     ed = st.data_editor(df_mestra, num_rows="dynamic")
     if st.button("Salvar Tudo"): salvar_csv(ed, "Aba_Mestra.csv"); st.success("Salvo!")
 
+# --- 📜 ABA: BANCO ---
 elif aba == "📜 Banco de Dados":
-    st.title("📜 Histórico Geral")
     st.dataframe(df_hist)
