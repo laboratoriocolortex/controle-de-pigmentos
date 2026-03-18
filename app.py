@@ -41,12 +41,12 @@ df_hist = carregar_dados("Historico_Producao.csv")
 df_padr = carregar_dados("Padroes_Registrados.csv")
 
 # --- NAVEGAÇÃO ---
-menu = ["🚀 Produção (Toques)", "📈 Gráficos CEP", "📋 Padrões Registrados", "📜 Banco de Dados", "➕ Cadastro de Produtos", "📊 Editor Aba Mestra", "📂 Importar CSV"]
+menu = ["🚀 Registro de Pigmentação", "📈 Controle de Pigmentação", "📋 Padrões Registrados", "📜 Banco de Dados", "➕ Cadastro de Produtos", "📊 Editor Aba Mestra", "📂 Importar CSV"]
 aba = st.sidebar.radio("Navegação:", menu)
 
 # --- 🚀 ABA: PRODUÇÃO ---
-if aba == "🚀 Produção (Toques)":
-    st.title("🚀 Registro de Pesagem")
+if aba == "🚀 Registro de Pigmentação":
+    st.title("🚀 Registro de Pigmentação")
     if df_mestra.empty:
         st.warning("⚠️ Aba Mestra vazia. Importe a planilha para começar.")
     else:
@@ -111,8 +111,8 @@ if aba == "🚀 Produção (Toques)":
                 st.success("Salvo!"); st.rerun()
 
 # --- 📈 ABA: CEP (STATUS APENAS EMOJI 🚨 PARA EXCESSO) ---
-elif aba == "📈 Gráficos CEP":
-    st.title("📈 Análise de Precisão")
+elif aba == "📈 Controle de Pigmentação":
+    st.title("📈 Cartas de Controle")
     if df_hist.empty:
         st.info("Sem dados.")
     else:
@@ -134,7 +134,7 @@ elif aba == "📈 Gráficos CEP":
         if not df_plot.empty:
             df_plot['lote'] = df_plot['lote'].astype(str)
             st.line_chart(df_plot.pivot_table(index='lote', columns='pigmento', values='Desvio_%', aggfunc='mean'))
-            st.subheader("📋 Relatório de Pesagem")
+            st.subheader("📋 Relatório de Controle")
             st.dataframe(
                 df_plot[['data', 'lote', 'pigmento', 'Quant ad (g)', 'OP_g', 'Desvio_%', 'Status']].style.format({'Desvio_%': '{:.2f}%'})
             )
