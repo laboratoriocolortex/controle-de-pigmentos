@@ -18,18 +18,26 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNÇÕES DE TRATAMENTO DE DADOS ---
+# --- FUNÇÕES DE TRATAMENTO DE DADOS (ATUALIZADA PARA TRATAR VÍRGULAS) ---
 def carregar_dados(arquivo):
     if not os.path.exists(arquivo): return pd.DataFrame()
     try:
+        # Tenta carregar com detecção automática de separador
         try:
             df = pd.read_csv(arquivo, sep=None, engine='python', encoding='latin-1')
         except:
             df = pd.read_csv(arquivo, sep=None, engine='python', encoding='utf-8')
         
         df.columns = [str(c).strip() for c in df.columns]
-        if 'toque' in df.columns: df = df.drop(columns=['toque'])
         
+        # TRATAMENTO CRÍTICO DE NÚMEROS: Troca vírgula por ponto ANTES de converter
+        colunas_num = ['Quantidade OP', 'Quant ad (g)', 'Litros/Unit']
+        for col in colunas_num:
+            if col in df.columns:
+                df[col] = df[col].astype(str).str.replace(',', '.') # Limpa vírgula do Excel BR
+                df[col] = pd.to_numeric(df[col], errors='coerce')   # Converte para Float
+        
+        if 'toque' in df.columns: df = df.drop(columns=['toque'])
         if 'data' in df.columns:
             df['data_dt'] = pd.to_datetime(df['data'], format='%d/%m/%Y', errors='coerce')
         return df
@@ -37,6 +45,7 @@ def carregar_dados(arquivo):
 
 def salvar_csv(df, arquivo):
     df_save = df.drop(columns=['data_dt', 'toque'], errors='ignore').copy()
+    # No salvamento, forçamos o ponto e 5 casas para garantir padrão universal
     if 'Quantidade OP' in df_save.columns:
         df_save['Quantidade OP'] = pd.to_numeric(df_save['Quantidade OP'], errors='coerce').map('{:.5f}'.format)
     df_save.to_csv(arquivo, index=False, encoding='latin-1')
@@ -69,7 +78,6 @@ if aba == "🚀 Produção":
             opcoes_v = ["0,9L", "3L", "3,6L", "14L", "15L", "18L", "5kg", "18kg", "25kg", "Outro"]
             sel_v = st.select_slider("Embalagem:", options=opcoes_v, value="15L")
             litros_u = float(sel_v.replace('L','').replace('kg','').replace(',','.')) if sel_v != "Outro" else st.number_input("Valor Unit:", value=15.0)
-                
         with v4:
             st.write("") 
             salvar_como_padrao = st.checkbox("🌟 Salvar como novo padrão")
@@ -81,7 +89,7 @@ if aba == "🚀 Produção":
         registros_lote = []
         for i, row in formula.iterrows():
             pigm = row['Pigmento']
-            coef = pd.to_numeric(str(row['Quant OP (kg)']).replace(',', '.'), errors='coerce')
+            coef = float(row['Quant OP (kg)'])
             sugestao_g = round(coef * vol_p_tot * 1000, 2)
             
             with st.container():
@@ -136,9 +144,6 @@ elif aba == "📈 Gráficos CEP":
             df_plot = df_plot[(df_plot['data_dt'].dt.date >= d_ini) & (df_plot['data_dt'].dt.date <= d_fim)]
 
         if not df_plot.empty:
-            for col in ['Quant ad (g)', 'Quantidade OP']:
-                df_plot[col] = pd.to_numeric(df_plot[col].astype(str).str.replace(',', '.'), errors='coerce').fillna(0.0)
-            
             df_plot['OP_g'] = df_plot['Quantidade OP'] * 1000
             df_plot['Desvio (g)'] = df_plot['Quant ad (g)'] - df_plot['OP_g']
             df_plot['Var %'] = ((df_plot['Quant ad (g)'] / df_plot['OP_g'].replace(0, np.nan)) - 1) * 100
@@ -146,37 +151,31 @@ elif aba == "📈 Gráficos CEP":
             st.subheader("Tendência de Desvios (%)")
             st.line_chart(df_plot.pivot_table(index='lote', columns='pigmento', values='Var %'))
             
-            # --- TABELA DE VISUALIZAÇÃO COM EMOJIS ---
             st.subheader("📋 Dados Brutos Filtrados")
             df_table = df_plot.drop(columns=['data_dt', 'OP_g', 'Var %'], errors='ignore').copy()
             
-            # Lógica dos Emojis: OK se <= 10% de excesso. ALERTA se > 10% excesso.
             def situacao_emoji(row):
                 op_g = float(row['Quantidade OP']) * 1000
                 ad_g = float(row['Quant ad (g)'])
-                # Se ad_g for menor ou igual à OP + 10% de tolerância, está OK
                 return "✅ Ok" if ad_g <= (op_g * 1.10) else "⚠️ Alerta"
 
             df_table['Situação'] = df_table.apply(situacao_emoji, axis=1)
-            
-            # Formatação numérica
             df_table['Quantidade OP'] = df_table['Quantidade OP'].map('{:.5f}'.format)
             df_table['Desvio (g)'] = df_table['Desvio (g)'].map('{:.1f}'.format)
                 
             st.dataframe(df_table, use_container_width=True)
-            
             csv_data = df_plot.to_csv(index=False).encode('utf-8-sig')
             st.download_button(label="📥 Baixar Relatório (CSV)", data=csv_data, file_name=f"CEP_{p_sel}_{c_sel}.csv", mime="text/csv")
         else:
             st.warning("Sem registros.")
 
-# --- 📜 ABA: BANCO DE DADOS (COM BUSCA E EXCLUSÃO) ---
+# --- 📜 ABA: BANCO DE DADOS (MANUTENÇÃO) ---
 elif aba == "📜 Banco de Dados":
     st.title("📜 Histórico e Manutenção")
     if not df_hist.empty:
         df_display = df_hist.drop(columns=['data_dt'], errors='ignore').copy()
         if 'Quantidade OP' in df_display.columns:
-            df_display['Quantidade OP'] = pd.to_numeric(df_display['Quantidade OP'], errors='coerce').map('{:.5f}'.format)
+            df_display['Quantidade OP'] = df_display['Quantidade OP'].map('{:.5f}'.format)
         st.dataframe(df_display, use_container_width=True)
     
     st.divider()
@@ -209,7 +208,7 @@ elif aba == "📜 Banco de Dados":
                     st.error("Lote excluído."); time.sleep(1.2); st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
 
-# --- DEMAIS ABAS (MANTIDAS) ---
+# --- DEMAIS ABAS ---
 elif aba == "📋 Padrões Registrados":
     st.title("📋 Padrões Registrados")
     st.dataframe(df_padr, use_container_width=True)
