@@ -7,7 +7,7 @@ from datetime import datetime, date
 # 1. Configuração de Layout
 st.set_page_config(page_title="Colortex 2026 - Gestão de R&D", layout="wide", page_icon="🧪")
 
-# --- ESTILO CSS PARA MELHORAR VISUALIZAÇÃO ---
+# --- ESTILO CSS ---
 st.markdown("""
     <style>
     .stNumberInput { margin-bottom: -1rem; }
@@ -27,13 +27,13 @@ def carregar_dados(arquivo):
         
         df.columns = [str(c).strip() for c in df.columns]
         if 'data' in df.columns:
-            # Converte para data para lógica de filtro, mantendo o formato DD/MM/YYYY
+            # Converte a coluna de texto para data real para podermos filtrar
             df['data_dt'] = pd.to_datetime(df['data'], format='%d/%m/%Y', errors='coerce')
         return df
     except: return pd.DataFrame()
 
 def salvar_csv(df, arquivo):
-    # Remove coluna auxiliar de data antes de salvar no CSV físico
+    # Remove a coluna auxiliar de data antes de salvar no arquivo físico
     df_save = df.drop(columns=['data_dt'], errors='ignore')
     df_save.to_csv(arquivo, index=False, encoding='latin-1')
 
@@ -111,14 +111,14 @@ if aba == "🚀 Produção (Toques)":
                     novo_padr = pd.DataFrame([{"Data": data_f.strftime("%d/%m/%Y"), "Produto": t_sel, "Cor": cor_sel, "Lote": lote_id, "Status": "Padrão"}])
                     df_padr = pd.concat([df_padr, novo_padr], ignore_index=True)
                     salvar_csv(df_padr, "Padroes_Registrados.csv")
-                st.success("Lote salvo com sucesso!"); st.rerun()
+                st.success("Salvo com sucesso!"); st.rerun()
 
-# --- 📈 ABA: CEP (FILTRO OPCIONAL E CORREÇÃO DE ERROS) ---
+# --- 📈 ABA: CEP (FILTRO OPCIONAL E EXPORTAÇÃO CORRIGIDA) ---
 elif aba == "📈 Gráficos CEP":
     st.title("📈 Dashboard de Qualidade e Consumo")
     
     if df_hist.empty:
-        st.info("Ainda não há dados de produção registrados.")
+        st.info("Ainda não há dados registrados no histórico.")
     else:
         with st.expander("🔍 Filtros de Busca", expanded=True):
             f1, f2, f3, f4, f5 = st.columns([1.2, 1, 1, 1.5, 1.5])
@@ -129,18 +129,22 @@ elif aba == "📈 Gráficos CEP":
             with f3: 
                 d_fim = st.date_input("Fim", datetime.now(), format="DD/MM/YYYY", disabled=not usar_filtro_data)
             with f4: 
-                p_sel = st.selectbox("Produto", sorted(df_hist['tipo de produto'].unique()))
+                # Garantir que as variáveis de seleção existam antes de qualquer erro
+                opcoes_prod = sorted(df_hist['tipo de produto'].unique())
+                p_sel = st.selectbox("Produto", opcoes_prod)
             with f5: 
-                c_sel = st.selectbox("Cor", sorted(df_hist[df_hist['tipo de produto'] == p_sel]['cor'].unique()))
+                opcoes_cor = sorted(df_hist[df_hist['tipo de produto'] == p_sel]['cor'].unique())
+                c_sel = st.selectbox("Cor", opcoes_cor)
 
-        # Lógica de filtragem
+        # Filtragem Principal
         df_plot = df_hist[(df_hist['tipo de produto'] == p_sel) & (df_hist['cor'] == c_sel)].copy()
         
+        # Filtragem Opcional por Data
         if usar_filtro_data:
             df_plot = df_plot[(df_plot['data_dt'].dt.date >= d_ini) & (df_plot['data_dt'].dt.date <= d_fim)]
 
         if not df_plot.empty:
-            # Conversão de valores
+            # Tratamento numérico para evitar erros de cálculo
             for col in ['Quant ad (g)', 'Quantidade OP']:
                 df_plot[col] = pd.to_numeric(df_plot[col].astype(str).str.replace(',', '.'), errors='coerce').fillna(0.0)
             
@@ -148,22 +152,23 @@ elif aba == "📈 Gráficos CEP":
             df_plot['Desvio (g)'] = df_plot['Quant ad (g)'] - df_plot['OP_g']
             df_plot['Status'] = df_plot.apply(lambda r: "🚨" if (r['OP_g'] > 0 and (r['Desvio (g)'] / r['OP_g']) * 100 > 10.0) else "✅", axis=1)
 
-            # Gráfico de Tendência
+            # Gráfico
             df_plot['lote'] = df_plot['lote'].astype(str)
             st.line_chart(df_plot.assign(Var_Perc=((df_plot['Quant ad (g)']/df_plot['OP_g'].replace(0,np.nan))-1)*100).pivot_table(index='lote', columns='pigmento', values='Var_Perc'))
             
-            st.subheader("📋 Relatório de Pesagem")
+            st.subheader("📋 Relatório Filtrado")
             st.dataframe(df_plot[['data', 'lote', 'pigmento', 'Quant ad (g)', 'OP_g', 'Desvio (g)', 'Status']].style.format({
                 'Desvio (g)': '{:.2f}g', 
                 'Quant ad (g)': '{:.2f}g', 
                 'OP_g': '{:.2f}g'
             }))
             
-            # EXPORTAÇÃO CORRIGIDA (Unicode utf-8-sig e variável unificada)
-            relatorio_csv = df_plot.to_csv(index=False).encode('utf-8-sig')
+            # --- CORREÇÃO DO ERRO DE EXPORTAÇÃO ---
+            # Geramos o CSV com utf-8-sig para suportar acentos e ser lido pelo Excel
+            csv_export = df_plot.to_csv(index=False).encode('utf-8-sig')
             st.download_button(
                 label="📥 Baixar Relatório (CSV)", 
-                data=relatorio_csv, 
+                data=csv_export, 
                 file_name=f"Relatorio_{p_sel}_{cor_sel}.csv", 
                 mime="text/csv"
             )
@@ -175,12 +180,12 @@ elif aba == "📈 Gráficos CEP":
             with c1:
                 st.dataframe(res_est.style.format({'Desvio (g)': '{:.2f}g'}).applymap(lambda x: 'color: red;' if x > 0 else 'color: green;', subset=['Desvio (g)']))
             with c2:
-                total_geral = res_est['Desvio (g)'].sum()
-                st.metric("Saldo Geral do Período", f"{total_geral:.2f} g", delta=f"{total_geral:.2f} g", delta_color="inverse")
+                total_acumulado = res_est['Desvio (g)'].sum()
+                st.metric("Saldo Geral", f"{total_acumulado:.2f} g", delta=f"{total_acumulado:.2f} g", delta_color="inverse")
         else:
-            st.warning("Nenhum dado encontrado para os filtros aplicados.")
+            st.warning("Sem dados para exibir com os filtros atuais.")
 
-# --- DEMAIS ABAS (SEM ALTERAÇÕES DE LÓGICA) ---
+# --- OUTRAS ABAS ---
 elif aba == "➕ Cadastro de Produtos":
     st.title("➕ Novo Pigmento na Mestra")
     with st.form("f_cad"):
@@ -194,20 +199,17 @@ elif aba == "➕ Cadastro de Produtos":
                 salvar_csv(df_mestra, "Aba_Mestra.csv"); st.success("Cadastrado!"); st.rerun()
 
 elif aba == "📋 Padrões Registrados":
-    st.title("📋 Padrões Registrados")
     st.dataframe(df_padr)
 
 elif aba == "📂 Importar CSV":
     up = st.file_uploader("Arquivo CSV", type="csv")
     alvo = st.selectbox("Destino", ["Aba_Mestra.csv", "Historico_Producao.csv", "Padroes_Registrados.csv"])
-    if up and st.button("Confirmar Importação"):
-        df_imp = pd.read_csv(up, encoding='latin-1', sep=None, engine='python')
-        salvar_csv(df_imp, alvo); st.success("Dados importados!"); st.rerun()
+    if up and st.button("Confirmar"):
+        salvar_csv(pd.read_csv(up, encoding='latin-1', sep=None, engine='python'), alvo); st.success("Ok!"); st.rerun()
 
 elif aba == "📊 Editor Aba Mestra":
     ed = st.data_editor(df_mestra, num_rows="dynamic")
-    if st.button("Salvar Alterações"): salvar_csv(ed, "Aba_Mestra.csv"); st.success("Aba Mestra atualizada!")
+    if st.button("Salvar Tudo"): salvar_csv(ed, "Aba_Mestra.csv"); st.success("Salvo!")
 
 elif aba == "📜 Banco de Dados":
-    st.title("📜 Histórico Geral de Produção")
     st.dataframe(df_hist)
