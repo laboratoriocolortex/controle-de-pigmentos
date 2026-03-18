@@ -27,13 +27,11 @@ def carregar_dados(arquivo):
         
         df.columns = [str(c).strip() for c in df.columns]
         if 'data' in df.columns:
-            # Converte para objeto de data para permitir filtros lógicos
             df['data_dt'] = pd.to_datetime(df['data'], format='%d/%m/%Y', errors='coerce')
         return df
     except: return pd.DataFrame()
 
 def salvar_csv(df, arquivo):
-    # Remove a coluna auxiliar de data antes de gravar no arquivo
     df_save = df.drop(columns=['data_dt'], errors='ignore')
     df_save.to_csv(arquivo, index=False, encoding='latin-1')
 
@@ -112,30 +110,23 @@ if aba == "🚀 Produção (Toques)":
                     salvar_csv(df_padr, "Padroes_Registrados.csv")
                 st.success("Salvo!"); st.rerun()
 
-# --- 📈 ABA: GRÁFICOS CEP (CORRIGIDA) ---
+# --- 📈 ABA: GRÁFICOS CEP (VERSÃO BLINDADA) ---
 elif aba == "📈 Gráficos CEP":
     st.title("📈 Dashboard de Qualidade e Consumo")
     
     if df_hist.empty:
-        st.info("Sem dados.")
+        st.info("Sem dados no histórico.")
     else:
         with st.expander("🔍 Filtros de Busca", expanded=True):
             f1, f2, f3, f4, f5 = st.columns([1.2, 1, 1, 1.5, 1.5])
-            with f1: 
-                usar_filtro = st.checkbox("Ativar Filtro de Data?", value=False)
-            with f2: 
-                d_ini = st.date_input("Início", date(datetime.now().year, datetime.now().month, 1), format="DD/MM/YYYY", disabled=not usar_filtro)
-            with f3: 
-                d_fim = st.date_input("Fim", datetime.now(), format="DD/MM/YYYY", disabled=not usar_filtro)
-            with f4: 
-                p_sel = st.selectbox("Produto", sorted(df_hist['tipo de produto'].unique()))
-            with f5: 
-                c_sel = st.selectbox("Cor", sorted(df_hist[df_hist['tipo de produto'] == p_sel]['cor'].unique()))
+            with f1: usar_filtro = st.checkbox("Ativar Filtro de Data?", value=False)
+            with f2: d_ini = st.date_input("Início", date(datetime.now().year, datetime.now().month, 1), format="DD/MM/YYYY", disabled=not usar_filtro)
+            with f3: d_fim = st.date_input("Fim", datetime.now(), format="DD/MM/YYYY", disabled=not usar_filtro)
+            with f4: p_sel = st.selectbox("Produto", sorted(df_hist['tipo de produto'].unique()))
+            with f5: c_sel = st.selectbox("Cor", sorted(df_hist[df_hist['tipo de produto'] == p_sel]['cor'].unique()))
 
-        # Filtragem Base
         df_plot = df_hist[(df_hist['tipo de produto'] == p_sel) & (df_hist['cor'] == c_sel)].copy()
         
-        # Aplicar data se o checkbox estiver ativo
         if usar_filtro:
             df_plot = df_plot[(df_plot['data_dt'].dt.date >= d_ini) & (df_plot['data_dt'].dt.date <= d_fim)]
 
@@ -149,18 +140,15 @@ elif aba == "📈 Gráficos CEP":
 
             st.line_chart(df_plot.assign(Var_Perc=((df_plot['Quant ad (g)']/df_plot['OP_g'].replace(0,np.nan))-1)*100).pivot_table(index='lote', columns='pigmento', values='Var_Perc'))
             
-            st.subheader("📋 Relatório")
-            st.dataframe(df_plot[['data', 'lote', 'pigmento', 'Quant ad (g)', 'OP_g', 'Desvio (g)', 'Status']].style.format({
-                'Desvio (g)': '{:.2f}g', 'Quant ad (g)': '{:.2f}g', 'OP_g': '{:.2f}g'
-            }))
+            st.subheader("Relatório")
+            st.dataframe(df_plot[['data', 'lote', 'pigmento', 'Quant ad (g)', 'OP_g', 'Desvio (g)', 'Status']].style.format({'Desvio (g)': '{:.2f}g', 'Quant ad (g)': '{:.2f}g', 'OP_g': '{:.2f}g'}))
             
-            # --- FIX DEFINITIVO PARA DOWNLOAD ---
-            # utf-8-sig resolve os acentos e o Excel abre direto
+            # BLOCO DE EXPORTAÇÃO FIXO (Sem NameError ou UnicodeError)
             csv_data = df_plot.to_csv(index=False).encode('utf-8-sig')
             st.download_button(
-                label="📥 Baixar Relatório (CSV)", 
-                data=csv_data, 
-                file_name=f"Relatorio_{p_sel}_{cor_sel}.csv", 
+                label="📥 Baixar Relatório (CSV)",
+                data=csv_data,
+                file_name=f"Relatorio_{p_sel}_{c_sel}.csv",
                 mime="text/csv"
             )
 
@@ -168,15 +156,12 @@ elif aba == "📈 Gráficos CEP":
             st.subheader("📊 Consumo Acumulado")
             res_est = df_plot.groupby('pigmento')['Desvio (g)'].sum().reset_index()
             c1, c2 = st.columns([2, 1])
-            with c1:
-                st.dataframe(res_est.style.format({'Desvio (g)': '{:.2f}g'}).applymap(lambda x: 'color: red;' if x > 0 else 'color: green;', subset=['Desvio (g)']))
-            with c2:
-                total = res_est['Desvio (g)'].sum()
-                st.metric("Saldo Geral", f"{total:.2f} g", delta=f"{total:.2f} g", delta_color="inverse")
+            with c1: st.dataframe(res_est.style.format({'Desvio (g)': '{:.2f}g'}).applymap(lambda x: 'color: red;' if x > 0 else 'color: green;', subset=['Desvio (g)']))
+            with c2: st.metric("Saldo Geral", f"{res_est['Desvio (g)'].sum():.2f} g")
         else:
             st.warning("Sem registros para este filtro.")
 
-# --- OUTRAS ABAS ---
+# --- DEMAIS ABAS ---
 elif aba == "➕ Cadastro de Produtos":
     st.title("➕ Novo Pigmento na Mestra")
     with st.form("f_cad"):
