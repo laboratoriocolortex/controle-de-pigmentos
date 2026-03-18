@@ -13,6 +13,7 @@ st.markdown("""
     <style>
     .stNumberInput { margin-bottom: -1rem; }
     .stButton > button { width: 100%; background-color: #d4edda; color: #155724; font-weight: bold; height: 3em; }
+    .btn-delete > div > button { background-color: #f8d7da !important; color: #721c24 !important; border: 1px solid #f5c6cb !important; }
     hr { margin: 0.8rem 0rem !important; }
     </style>
     """, unsafe_allow_html=True)
@@ -36,11 +37,8 @@ def carregar_dados(arquivo):
 
 def salvar_csv(df, arquivo):
     df_save = df.drop(columns=['data_dt', 'toque'], errors='ignore').copy()
-    
-    # Força 5 casas decimais na OP para evitar notação científica no CSV/Excel
     if 'Quantidade OP' in df_save.columns:
         df_save['Quantidade OP'] = pd.to_numeric(df_save['Quantidade OP'], errors='coerce').map('{:.5f}'.format)
-    
     df_save.to_csv(arquivo, index=False, encoding='latin-1')
 
 # --- CARREGAMENTO INICIAL ---
@@ -52,7 +50,7 @@ df_padr = carregar_dados("Padroes_Registrados.csv")
 menu = ["🚀 Produção", "📈 Gráficos CEP", "📋 Padrões Registrados", "📜 Banco de Dados", "➕ Cadastro de Produtos", "📊 Editor Aba Mestra", "📂 Importar CSV"]
 aba = st.sidebar.radio("Navegação:", menu)
 
-# --- 🚀 ABA: PRODUÇÃO ---
+# --- 🚀 ABA: PRODUÇÃO --- (Mantida sem alterações)
 if aba == "🚀 Produção":
     st.title("🚀 Registro de Pesagem")
     if df_mestra.empty:
@@ -75,7 +73,6 @@ if aba == "🚀 Produção":
                 litros_u = float(val_limpo)
             else:
                 litros_u = st.number_input("Valor Unit:", value=15.0)
-                
         with v4:
             st.write("") 
             salvar_como_padrao = st.checkbox("🌟 Salvar como novo padrão")
@@ -89,7 +86,6 @@ if aba == "🚀 Produção":
             pigm = row['Pigmento']
             coef = pd.to_numeric(str(row['Quant OP (kg)']).replace(',', '.'), errors='coerce')
             sugestao_g = round(coef * vol_p_tot * 1000, 2)
-            
             with st.container():
                 col_i, col_p = st.columns([1.5, 3.5])
                 with col_i:
@@ -121,13 +117,9 @@ if aba == "🚀 Produção":
                     novo_padr = pd.DataFrame([{"Data": data_f.strftime("%d/%m/%Y"), "Produto": t_sel, "Cor": cor_sel, "Lote": lote_id, "Status": "Padrão"}])
                     df_padr = pd.concat([df_padr, novo_padr], ignore_index=True)
                     salvar_csv(df_padr, "Padroes_Registrados.csv")
-                
-                st.balloons()
-                st.success("Lote salvo com sucesso!")
-                time.sleep(1.2)
-                st.rerun()
+                st.balloons(); st.success("Lote salvo!"); time.sleep(1.2); st.rerun()
 
-# --- 📈 ABA: GRÁFICOS CEP ---
+# --- 📈 ABA: GRÁFICOS CEP --- (Mantida com a correção do NameError)
 elif aba == "📈 Gráficos CEP":
     st.title("📈 Dashboard de Qualidade")
     if df_hist.empty:
@@ -148,29 +140,23 @@ elif aba == "📈 Gráficos CEP":
         if not df_plot.empty:
             for col in ['Quant ad (g)', 'Quantidade OP']:
                 df_plot[col] = pd.to_numeric(df_plot[col].astype(str).str.replace(',', '.'), errors='coerce').fillna(0.0)
-            
             df_plot['OP_g'] = df_plot['Quantidade OP'] * 1000
             df_plot['Desvio (g)'] = df_plot['Quant ad (g)'] - df_plot['OP_g']
-            
             st.subheader("Tendência de Desvios (%)")
             st.line_chart(df_plot.assign(Var_Perc=((df_plot['Quant ad (g)']/df_plot['OP_g'].replace(0,np.nan))-1)*100).pivot_table(index='lote', columns='pigmento', values='Var_Perc'))
             
-            # --- TABELA DE VISUALIZAÇÃO ---
             st.subheader("📋 Dados Brutos Filtrados")
             df_cep_table = df_plot.drop(columns=['data_dt', 'OP_g'], errors='ignore').copy()
-            
             if 'Quantidade OP' in df_cep_table.columns:
                 df_cep_table['Quantidade OP'] = df_cep_table['Quantidade OP'].map('{:.5f}'.format)
             if 'Desvio (g)' in df_cep_table.columns:
                 df_cep_table['Desvio (g)'] = pd.to_numeric(df_cep_table['Desvio (g)'], errors='coerce').map('{:.1f}'.format)
-                
             st.dataframe(df_cep_table, use_container_width=True)
             
             csv_data = df_plot.to_csv(index=False).encode('utf-8-sig')
-            # CORREÇÃO DO NameError: Usando as variáveis p_sel e c_sel definidas acima
             st.download_button(label="📥 Baixar Relatório (CSV)", data=csv_data, file_name=f"CEP_{p_sel}_{c_sel}.csv", mime="text/csv")
         else:
-            st.warning("Sem registros para os filtros selecionados.")
+            st.warning("Sem registros.")
 
 # --- 📋 ABA: PADRÕES REGISTRADOS ---
 elif aba == "📋 Padrões Registrados":
@@ -180,12 +166,12 @@ elif aba == "📋 Padrões Registrados":
         if st.button("Limpar Todos os Padrões"):
             salvar_csv(pd.DataFrame(columns=["Data", "Produto", "Cor", "Lote", "Status"]), "Padroes_Registrados.csv")
             st.rerun()
-    else:
-        st.info("Nenhum padrão registrado.")
+    else: st.info("Nenhum padrão registrado.")
 
-# --- 📜 ABA: BANCO DE DADOS ---
+# --- 📜 ABA: BANCO DE DADOS (COM BUSCA E EXCLUSÃO) ---
 elif aba == "📜 Banco de Dados":
     st.title("📜 Histórico Geral de Produção")
+    
     if not df_hist.empty:
         st.subheader("📂 Tabela de Visualização Completa")
         df_display = df_hist.drop(columns=['data_dt'], errors='ignore').copy()
@@ -197,46 +183,60 @@ elif aba == "📜 Banco de Dados":
 
     st.divider()
 
-    with st.container():
-        st.subheader("🌟 Definir Novo Padrão via Busca")
-        lote_busca = st.text_input("Digite o Lote para registrar como padrão:", placeholder="Ex: 2024.10")
-        if lote_busca:
-            resultado = df_hist[df_hist['lote'].astype(str) == lote_busca].drop_duplicates(subset=['lote'])
-            if not resultado.empty:
-                row = resultado.iloc[0]
-                st.success(f"Lote encontrado: **{row['tipo de produto']} - {row['cor']}**")
-                if st.button(f"⭐ Confirmar Lote {lote_busca} como Padrão"):
+    # SEÇÃO DE BUSCA E PADRÃO (MANTIDA)
+    c_padr, c_del = st.columns(2)
+    
+    with c_padr:
+        st.subheader("🌟 Definir Novo Padrão")
+        lote_padr = st.text_input("Lote para Padrão:", placeholder="Busque o lote...")
+        if lote_padr:
+            res_padr = df_hist[df_hist['lote'].astype(str) == lote_padr].drop_duplicates(subset=['lote'])
+            if not res_padr.empty:
+                row = res_padr.iloc[0]
+                st.success(f"Encontrado: {row['tipo de produto']} - {row['cor']}")
+                if st.button(f"⭐ Confirmar Padrão {lote_padr}"):
                     novo_p = pd.DataFrame([{"Data": row['data'], "Produto": row['tipo de produto'], "Cor": row['cor'], "Lote": row['lote'], "Status": "Padrão"}])
                     df_padr = pd.concat([df_padr, novo_p], ignore_index=True).drop_duplicates()
                     salvar_csv(df_padr, "Padroes_Registrados.csv")
-                    st.toast("Padrão salvo!", icon='⭐')
-            else:
-                st.error("Lote não encontrado.")
+                    st.toast("Padrão salvo!"); time.sleep(1); st.rerun()
+            else: st.error("Não encontrado.")
 
-# --- ➕ ABA: CADASTRO DE PRODUTOS ---
+    # NOVA SEÇÃO: EXCLUSÃO DE REGISTRO
+    with c_del:
+        st.subheader("🗑️ Apagar Lote Incorreto")
+        lote_del = st.text_input("Lote para APAGAR:", placeholder="CUIDADO: ação irreversível")
+        if lote_del:
+            res_del = df_hist[df_hist['lote'].astype(str) == lote_del]
+            if not res_del.empty:
+                st.warning(f"O lote {lote_del} possui {len(res_del)} registros de pigmentos.")
+                st.markdown('<div class="btn-delete">', unsafe_allow_html=True)
+                if st.button(f"🚨 APAGAR LOTE {lote_del} DEFINITIVAMENTE"):
+                    # Remove do histórico
+                    df_hist = df_hist[df_hist['lote'].astype(str) != lote_del]
+                    salvar_csv(df_hist, "Historico_Producao.csv")
+                    st.error(f"Lote {lote_del} removido com sucesso.")
+                    time.sleep(1.5); st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
+            elif lote_del:
+                st.info("Lote não localizado no banco.")
+
+# --- DEMAIS ABAS (MANTIDAS) ---
 elif aba == "➕ Cadastro de Produtos":
     st.title("➕ Cadastrar Novo Pigmento")
     with st.form("f_cad"):
         c1, c2 = st.columns(2)
         t = c1.text_input("Tipo"); p = c1.text_input("Pigmento"); cor = c2.text_input("Cor"); coef = c2.number_input("Coef (kg/L)", format="%.6f")
-        if st.form_submit_button("Cadastrar na Mestra"):
+        if st.form_submit_button("Cadastrar"):
             if t and cor and p:
                 n = pd.DataFrame([{"Tipo": t.title(), "Cor": cor.title(), "Pigmento": p.title(), "Quant OP (kg)": coef}])
                 df_mestra = pd.concat([df_mestra, n], ignore_index=True)
-                salvar_csv(df_mestra, "Aba_Mestra.csv")
-                st.snow()
-                st.success("Cadastrado!")
-                time.sleep(1.2)
-                st.rerun()
+                salvar_csv(df_mestra, "Aba_Mestra.csv"); st.snow(); st.success("Cadastrado!"); time.sleep(1.2); st.rerun()
 
-# --- DEMAIS ABAS ---
 elif aba == "📊 Editor Aba Mestra":
     ed = st.data_editor(df_mestra, num_rows="dynamic")
-    if st.button("Salvar Alterações"):
-        salvar_csv(ed, "Aba_Mestra.csv"); st.success("Salvo!")
+    if st.button("Salvar Alterações"): salvar_csv(ed, "Aba_Mestra.csv"); st.success("Salvo!")
 
 elif aba == "📂 Importar CSV":
     up = st.file_uploader("Selecione o arquivo CSV", type="csv")
     alvo = st.selectbox("Destino", ["Aba_Mestra.csv", "Historico_Producao.csv", "Padroes_Registrados.csv"])
-    if up and st.button("Confirmar Importação"):
-        salvar_csv(pd.read_csv(up, encoding='latin-1', sep=None, engine='python'), alvo); st.rerun()
+    if up and st.button("Confirmar Importação"): salvar_csv(pd.read_csv(up, encoding='latin-1', sep=None, engine='python'), alvo); st.rerun()
