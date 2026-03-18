@@ -27,12 +27,13 @@ def carregar_dados(arquivo):
         except:
             df = pd.read_csv(arquivo, sep=None, engine='python', encoding='utf-8')
         
-        # Limpeza de colunas indesejadas
-        cols_drop = [c for c in df.columns if "Unnamed" in str(c)] + ['data_dt_temp', 'toque', 'sugestão OP', 'sugestao OP']
+        # Remove colunas de lixo e temporárias
+        cols_drop = [c for c in df.columns if "Unnamed" in str(c)] + ['data_dt_temp', 'toque', 'sugestão OP', 'sugestao OP', 'Esperado (g)']
         df = df.drop(columns=[c for c in cols_drop if c in df.columns], errors='ignore')
         
         df.columns = [str(c).strip() for c in df.columns]
         
+        # Normaliza colunas numéricas (converte vírgula para ponto e trata vazios)
         for col in df.columns:
             if df[col].dtype == 'object':
                 df[col] = df[col].astype(str).str.strip()
@@ -46,12 +47,8 @@ def carregar_dados(arquivo):
     except: return pd.DataFrame()
 
 def salvar_csv(df, arquivo):
-    # Ao salvar, removemos colunas calculadas para não duplicar na próxima carga
-    cols_drop = [c for c in df.columns if "Unnamed" in str(c)] + ['data_dt_temp', 'toque', 'Desvio (g)', 'Var %', 'Situação', 'Esperado (g)']
-    df_save = df.drop(columns=[c for c in cols_drop if c in df.columns], errors='ignore').copy()
-    
-    # IMPORTANTE: No CSV, a Quantidade OP volta a ser o coeficiente para permitir novos cálculos
-    # Mas no App ela será exibida em gramas totais.
+    cols_extra = ['Desvio (g)', 'Var %', 'Situação', 'data_dt_temp', 'Esperado (g)']
+    df_save = df.drop(columns=[c for c in cols_extra if c in df.columns], errors='ignore').copy()
     df_save.to_csv(arquivo, index=False, encoding='latin-1')
 
 # --- CARREGAMENTO ---
@@ -59,22 +56,26 @@ df_mestra = carregar_dados("Aba_Mestra.csv")
 df_hist = carregar_dados("Historico_Producao.csv")
 df_padr = carregar_dados("Padroes_Registrados.csv")
 
-# --- 🔄 SINCRONIZAÇÃO E CONVERSÃO PARA GRAMAS TOTAIS ---
+# --- 🔄 CORREÇÃO MATEMÁTICA E SINCRONIZAÇÃO ---
 if not df_hist.empty and not df_mestra.empty:
-    mapeamento = df_mestra.set_index(['Tipo', 'Cor', 'Pigmento'])['Quant OP (kg)'].to_dict()
+    # Identifica qual o nome da coluna de peso na Mestra (trata o KeyError da imagem 4)
+    col_peso_mestra = 'Quant OP (kg)' if 'Quant OP (kg)' in df_mestra.columns else 'Quantidade OP'
     
-    def calcular_op_gramas(row):
+    mapeamento = df_mestra.set_index(['Tipo', 'Cor', 'Pigmento'])[col_peso_mestra].to_dict()
+    
+    def calcular_op_correto(row):
         chave = (str(row['tipo de produto']), str(row['cor']), str(row['pigmento']))
-        # Busca o coeficiente (kg/L)
+        # Coeficiente da Mestra (ex: 0.0048 kg/L)
         coef = float(mapeamento.get(chave, 0.0))
-        # Se não achou na mestra, tenta usar o que já está no histórico (caso tenha sido importado como coef)
-        if coef == 0.0: coef = float(row.get('Quantidade OP', 0.0))
         
-        # Cálculo: (Coef * Unidades * Litros) * 1000
+        # Volume Total do Lote em Litros
         vol_total = float(row.get('#Plan', 1)) * float(row.get('Litros/Unit', 1))
+        
+        # CÁLCULO FINAL: (kg/L * Litros) * 1000 = GRAMAS TOTAIS
+        # Ex: (0.0048 * 1 * 10) * 1000 = 48g
         return round(coef * vol_total * 1000, 2)
 
-    df_hist['Quantidade OP'] = df_hist.apply(calcular_op_gramas, axis=1)
+    df_hist['Quantidade OP'] = df_hist.apply(calcular_op_correto, axis=1)
 
 # --- NAVEGAÇÃO ---
 menu = ["🚀 Produção", "📈 Gráficos CEP", "📋 Padrões Registrados", "📜 Banco de Dados", "➕ Cadastro de Produtos", "📊 Editor Aba Mestra", "📂 Importar CSV"]
@@ -107,7 +108,9 @@ if aba == "🚀 Produção":
         registros_lote = []
         for i, row in formula.iterrows():
             pigm = row['Pigmento']
-            coef = float(row['Quant OP (kg)'])
+            # Busca coeficiente correto independente do nome da coluna na mestra
+            col_valor = 'Quant OP (kg)' if 'Quant OP (kg)' in row else 'Quantidade OP'
+            coef = float(row[col_valor])
             sugestao_g = round(coef * vol_p_tot * 1000, 2)
             
             with st.container():
@@ -143,12 +146,14 @@ elif aba == "📈 Gráficos CEP":
     st.title("📈 Dashboard de Qualidade")
     if df_hist.empty: st.info("Sem dados.")
     else:
-        p_sel = st.selectbox("Produto", sorted(df_hist['tipo de produto'].unique()))
-        c_sel = st.selectbox("Cor", sorted(df_hist[df_hist['tipo de produto'] == p_sel]['cor'].unique()))
-        df_plot = df_hist[(df_hist['tipo de produto'] == p_sel) & (df_hist['cor'] == c_sel)].copy()
+        p_lista = sorted(df_hist['tipo de produto'].unique())
+        p_sel = st.selectbox("Produto", p_lista)
+        c_lista = sorted(df_hist[df_hist['tipo de produto'] == p_sel]['cor'].unique())
+        cor_sel = st.selectbox("Cor", c_lista)
+
+        df_plot = df_hist[(df_hist['tipo de produto'] == p_sel) & (df_hist['cor'] == cor_sel)].copy()
 
         if not df_plot.empty:
-            # Aqui Quantidade OP já está em gramas totais devido à sincronização no topo
             df_plot['Desvio (g)'] = df_plot['Quant ad (g)'] - df_plot['Quantidade OP']
             df_plot['Var %'] = ((df_plot['Quant ad (g)'] / df_plot['Quantidade OP'].replace(0, np.nan)) - 1) * 100
             
@@ -160,13 +165,14 @@ elif aba == "📜 Banco de Dados":
     st.title("📜 Histórico e Auditoria")
     if not df_hist.empty:
         df_view = df_hist.copy()
-        # Cálculo simples pois as unidades agora são iguais (gramas)
         df_view['Desvio (g)'] = df_view['Quant ad (g)'] - df_view['Quantidade OP']
         
-        st.dataframe(df_view, use_container_width=True)
+        # Remove colunas de sistema antes de exibir
+        cols_final = [c for c in df_view.columns if c not in ['data_dt_temp', 'toque', 'sugestão OP']]
+        st.dataframe(df_view[cols_final], use_container_width=True)
         
-        csv_full = df_view.to_csv(index=False).encode('utf-8-sig')
-        st.download_button(label="📥 Exportar Banco de Dados", data=csv_full, file_name=f"Relatorio_Producao_{date.today()}.csv")
+        csv_full = df_view[cols_final].to_csv(index=False).encode('utf-8-sig')
+        st.download_button(label="📥 Exportar CSV", data=csv_full, file_name="Histórico_Produção.csv")
 
     st.divider()
     lote_d = st.text_input("Excluir Lote:")
@@ -174,7 +180,7 @@ elif aba == "📜 Banco de Dados":
         df_hist = df_hist[df_hist['lote'].astype(str) != lote_d]
         salvar_csv(df_hist, "Historico_Producao.csv"); st.rerun()
 
-# --- DEMAIS ABAS (Padrões, Cadastro, Editor, Importar) ---
+# --- ABAS DE SUPORTE ---
 elif aba == "📋 Padrões Registrados":
     st.title("📋 Padrões")
     st.dataframe(df_padr, use_container_width=True)
@@ -190,12 +196,10 @@ elif aba == "➕ Cadastro de Produtos":
                 df_mestra = pd.concat([df_mestra, n], ignore_index=True); salvar_csv(df_mestra, "Aba_Mestra.csv"); st.success("Salvo!")
 
 elif aba == "📊 Editor Aba Mestra":
-    st.title("📊 Editor Aba Mestra")
     ed = st.data_editor(df_mestra, num_rows="dynamic")
-    if st.button("Salvar Mestra"): salvar_csv(ed, "Aba_Mestra.csv"); st.success("Atualizada!")
+    if st.button("Salvar Mestra"): salvar_csv(ed, "Aba_Mestra.csv"); st.success("Salvo!")
 
 elif aba == "📂 Importar CSV":
-    st.title("📂 Importação")
     up = st.file_uploader("CSV", type="csv")
     alvo = st.selectbox("Destino", ["Aba_Mestra.csv", "Historico_Producao.csv"])
     if up and st.button("Importar"):
