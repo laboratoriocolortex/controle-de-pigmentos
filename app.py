@@ -41,12 +41,12 @@ df_hist = carregar_dados("Historico_Producao.csv")
 df_padr = carregar_dados("Padroes_Registrados.csv")
 
 # --- NAVEGAÇÃO ---
-menu = ["🚀 Produção (Toques)", "📈 Gráficos CEP", "📋 Padrões Registrados", "📜 Banco de Dados", "➕ Cadastro de Produtos", "📊 Editor Aba Mestra", "📂 Importar CSV"]
+menu = ["🚀 Registro", "📈 Controle", "📋 Padrões Registrados", "📜 Banco de Dados", "➕ Cadastro de Produtos", "📊 Editor Aba Mestra", "📂 Importar CSV"]
 aba = st.sidebar.radio("Navegação:", menu)
 
 # --- 🚀 ABA: PRODUÇÃO ---
-if aba == "🚀 Produção (Toques)":
-    st.title("🚀 Registro de Pesagem")
+if aba == "🚀 Registro":
+    st.title("🚀 Registro de Pigmentação")
     if df_mestra.empty:
         st.warning("⚠️ Aba Mestra vazia.")
     else:
@@ -111,8 +111,8 @@ if aba == "🚀 Produção (Toques)":
                 st.success("Salvo!"); st.rerun()
 
 # --- 📈 ABA: GRÁFICOS CEP (VERSÃO BLINDADA) ---
-elif aba == "📈 Gráficos CEP":
-    st.title("📈 Dashboard de Qualidade e Consumo")
+elif aba == "📈 Controle":
+    st.title("📈 Dashboard de Pigmentação")
     
     if df_hist.empty:
         st.info("Sem dados no histórico.")
@@ -140,7 +140,7 @@ elif aba == "📈 Gráficos CEP":
 
             st.line_chart(df_plot.assign(Var_Perc=((df_plot['Quant ad (g)']/df_plot['OP_g'].replace(0,np.nan))-1)*100).pivot_table(index='lote', columns='pigmento', values='Var_Perc'))
             
-            st.subheader("Relatório")
+            st.subheader("Relatório de Pigmentação")
             st.dataframe(df_plot[['data', 'lote', 'pigmento', 'Quant ad (g)', 'OP_g', 'Desvio (g)', 'Status']].style.format({'Desvio (g)': '{:.2f}g', 'Quant ad (g)': '{:.2f}g', 'OP_g': '{:.2f}g'}))
             
             # BLOCO DE EXPORTAÇÃO FIXO (Sem NameError ou UnicodeError)
