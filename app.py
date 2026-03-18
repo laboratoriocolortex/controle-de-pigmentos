@@ -14,28 +14,31 @@ st.markdown("""
     .stNumberInput { margin-bottom: -1rem; }
     .stButton > button { width: 100%; background-color: #d4edda; color: #155724; font-weight: bold; height: 3em; }
     .btn-delete > div > button { background-color: #f8d7da !important; color: #721c24 !important; border: 1px solid #f5c6cb !important; }
+    .btn-fix > div > button { background-color: #fff3cd !important; color: #856404 !important; border: 1px solid #ffeeba !important; }
     hr { margin: 0.8rem 0rem !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNÇÕES DE TRATAMENTO DE DADOS (ATUALIZADA PARA TRATAR VÍRGULAS) ---
+# --- FUNÇÕES DE TRATAMENTO DE DADOS ---
 def carregar_dados(arquivo):
     if not os.path.exists(arquivo): return pd.DataFrame()
     try:
-        # Tenta carregar com detecção automática de separador
         try:
             df = pd.read_csv(arquivo, sep=None, engine='python', encoding='latin-1')
         except:
             df = pd.read_csv(arquivo, sep=None, engine='python', encoding='utf-8')
         
+        # Limpeza de colunas e espaços em branco nos textos
         df.columns = [str(c).strip() for c in df.columns]
-        
-        # TRATAMENTO CRÍTICO DE NÚMEROS: Troca vírgula por ponto ANTES de converter
-        colunas_num = ['Quantidade OP', 'Quant ad (g)', 'Litros/Unit']
+        for col in df.select_dtypes(include=['object']).columns:
+            df[col] = df[col].astype(str).str.strip()
+
+        # Tratamento de números (Vírgula para Ponto)
+        colunas_num = ['Quantidade OP', 'Quant ad (g)', 'Litros/Unit', 'Quant OP (kg)']
         for col in colunas_num:
             if col in df.columns:
-                df[col] = df[col].astype(str).str.replace(',', '.') # Limpa vírgula do Excel BR
-                df[col] = pd.to_numeric(df[col], errors='coerce')   # Converte para Float
+                df[col] = df[col].astype(str).str.replace(',', '.').replace('nan', np.nan)
+                df[col] = pd.to_numeric(df[col], errors='coerce')
         
         if 'toque' in df.columns: df = df.drop(columns=['toque'])
         if 'data' in df.columns:
@@ -45,7 +48,6 @@ def carregar_dados(arquivo):
 
 def salvar_csv(df, arquivo):
     df_save = df.drop(columns=['data_dt', 'toque'], errors='ignore').copy()
-    # No salvamento, forçamos o ponto e 5 casas para garantir padrão universal
     if 'Quantidade OP' in df_save.columns:
         df_save['Quantidade OP'] = pd.to_numeric(df_save['Quantidade OP'], errors='coerce').map('{:.5f}'.format)
     df_save.to_csv(arquivo, index=False, encoding='latin-1')
@@ -59,7 +61,7 @@ df_padr = carregar_dados("Padroes_Registrados.csv")
 menu = ["🚀 Produção", "📈 Gráficos CEP", "📋 Padrões Registrados", "📜 Banco de Dados", "➕ Cadastro de Produtos", "📊 Editor Aba Mestra", "📂 Importar CSV"]
 aba = st.sidebar.radio("Navegação:", menu)
 
-# --- 🚀 ABA: PRODUÇÃO ---
+# --- 🚀 ABA: PRODUÇÃO (Inalterada) ---
 if aba == "🚀 Produção":
     st.title("🚀 Registro de Pesagem")
     if df_mestra.empty:
@@ -114,8 +116,7 @@ if aba == "🚀 Produção":
             st.divider()
 
         if st.button("💾 SALVAR LOTE"):
-            if not lote_id:
-                st.error("Preencha o Lote.")
+            if not lote_id: st.error("Preencha o Lote.")
             else:
                 df_hist = pd.concat([df_hist, pd.DataFrame(registros_lote)], ignore_index=True)
                 salvar_csv(df_hist, "Historico_Producao.csv")
@@ -125,11 +126,10 @@ if aba == "🚀 Produção":
                     salvar_csv(df_padr, "Padroes_Registrados.csv")
                 st.balloons(); st.success("Lote salvo!"); time.sleep(1.2); st.rerun()
 
-# --- 📈 ABA: GRÁFICOS CEP ---
+# --- 📈 ABA: GRÁFICOS CEP (Com Emojis) ---
 elif aba == "📈 Gráficos CEP":
     st.title("📈 Dashboard de Qualidade")
-    if df_hist.empty:
-        st.info("Sem dados no histórico.")
+    if df_hist.empty: st.info("Sem dados.")
     else:
         with st.expander("🔍 Filtros", expanded=True):
             f1, f2, f3, f4, f5 = st.columns([1.2, 1, 1, 1.5, 1.5])
@@ -140,11 +140,10 @@ elif aba == "📈 Gráficos CEP":
             with f5: c_sel = st.selectbox("Cor", sorted(df_hist[df_hist['tipo de produto'] == p_sel]['cor'].unique()))
 
         df_plot = df_hist[(df_hist['tipo de produto'] == p_sel) & (df_hist['cor'] == c_sel)].copy()
-        if usar_filtro:
-            df_plot = df_plot[(df_plot['data_dt'].dt.date >= d_ini) & (df_plot['data_dt'].dt.date <= d_fim)]
+        if usar_filtro: df_plot = df_plot[(df_plot['data_dt'].dt.date >= d_ini) & (df_plot['data_dt'].dt.date <= d_fim)]
 
         if not df_plot.empty:
-            df_plot['OP_g'] = df_plot['Quantidade OP'] * 1000
+            df_plot['OP_g'] = pd.to_numeric(df_plot['Quantidade OP'], errors='coerce') * 1000
             df_plot['Desvio (g)'] = df_plot['Quant ad (g)'] - df_plot['OP_g']
             df_plot['Var %'] = ((df_plot['Quant ad (g)'] / df_plot['OP_g'].replace(0, np.nan)) - 1) * 100
             
@@ -153,78 +152,72 @@ elif aba == "📈 Gráficos CEP":
             
             st.subheader("📋 Dados Brutos Filtrados")
             df_table = df_plot.drop(columns=['data_dt', 'OP_g', 'Var %'], errors='ignore').copy()
-            
-            def situacao_emoji(row):
-                op_g = float(row['Quantidade OP']) * 1000
-                ad_g = float(row['Quant ad (g)'])
-                return "✅ Ok" if ad_g <= (op_g * 1.10) else "⚠️ Alerta"
-
-            df_table['Situação'] = df_table.apply(situacao_emoji, axis=1)
+            df_table['Situação'] = df_table.apply(lambda r: "✅ Ok" if float(r['Quant ad (g)']) <= (float(r['Quantidade OP'])*1100) else "⚠️ Alerta", axis=1)
             df_table['Quantidade OP'] = df_table['Quantidade OP'].map('{:.5f}'.format)
             df_table['Desvio (g)'] = df_table['Desvio (g)'].map('{:.1f}'.format)
-                
             st.dataframe(df_table, use_container_width=True)
-            csv_data = df_plot.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(label="📥 Baixar Relatório (CSV)", data=csv_data, file_name=f"CEP_{p_sel}_{c_sel}.csv", mime="text/csv")
-        else:
-            st.warning("Sem registros.")
+        else: st.warning("Sem registros.")
 
-# --- 📜 ABA: BANCO DE DADOS (MANUTENÇÃO) ---
+# --- 📜 ABA: BANCO DE DADOS (MANUTENÇÃO PESADA) ---
 elif aba == "📜 Banco de Dados":
     st.title("📜 Histórico e Manutenção")
+    
+    # 1. BOTÃO DE CORREÇÃO AUTOMÁTICA DE NAN
     if not df_hist.empty:
+        nans_count = df_hist['Quantidade OP'].isna().sum()
+        if nans_count > 0:
+            st.warning(f"Existem {nans_count} registros com erro de Quantidade (nan).")
+            st.markdown('<div class="btn-fix">', unsafe_allow_html=True)
+            if st.button("🔧 CORRIGIR 'NAN' AUTOMATICAMENTE"):
+                # Mescla o histórico com a mestra para recuperar os coeficientes baseados em Tipo/Cor/Pigmento
+                mestra_lookup = df_mestra[['Tipo', 'Cor', 'Pigmento', 'Quant OP (kg)']].copy()
+                df_hist['Quantidade OP'] = df_hist.apply(
+                    lambda row: mestra_lookup[
+                        (mestra_lookup['Tipo'] == row['tipo de produto']) & 
+                        (mestra_lookup['Cor'] == row['cor']) & 
+                        (mestra_lookup['Pigmento'] == row['pigmento'])
+                    ]['Quant OP (kg)'].values[0] if pd.isna(row['Quantidade OP']) else row['Quantidade OP'],
+                    axis=1, errors='ignore'
+                )
+                salvar_csv(df_hist, "Historico_Producao.csv")
+                st.success("Correção concluída! Recarregando...")
+                time.sleep(1); st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+
         df_display = df_hist.drop(columns=['data_dt'], errors='ignore').copy()
         if 'Quantidade OP' in df_display.columns:
-            df_display['Quantidade OP'] = df_display['Quantidade OP'].map('{:.5f}'.format)
+            df_display['Quantidade OP'] = pd.to_numeric(df_display['Quantidade OP'], errors='coerce').map('{:.5f}'.format)
         st.dataframe(df_display, use_container_width=True)
     
     st.divider()
     c_padr, c_del = st.columns(2)
-    
     with c_padr:
         st.subheader("🌟 Definir Novo Padrão")
-        lote_padr = st.text_input("Lote para Padrão:", key="padr_in")
-        if lote_padr:
-            res = df_hist[df_hist['lote'].astype(str) == lote_padr].drop_duplicates(subset=['lote'])
+        lote_p = st.text_input("Lote:", key="padr_in")
+        if lote_p:
+            res = df_hist[df_hist['lote'].astype(str) == lote_p].drop_duplicates(subset=['lote'])
             if not res.empty:
                 row = res.iloc[0]
                 st.success(f"Lote: {row['tipo de produto']} - {row['cor']}")
-                if st.button(f"⭐ Confirmar Padrão {lote_padr}"):
+                if st.button(f"⭐ Confirmar Padrão {lote_p}"):
                     n = pd.DataFrame([{"Data": row['data'], "Produto": row['tipo de produto'], "Cor": row['cor'], "Lote": row['lote'], "Status": "Padrão"}])
                     df_padr = pd.concat([df_padr, n], ignore_index=True).drop_duplicates()
                     salvar_csv(df_padr, "Padroes_Registrados.csv"); st.toast("Padrão salvo!"); time.sleep(1); st.rerun()
 
     with c_del:
-        st.subheader("🗑️ Apagar Lote Incorreto")
-        lote_del = st.text_input("Lote para EXCLUIR:", key="del_in")
-        if lote_del:
-            res_del = df_hist[df_hist['lote'].astype(str) == lote_del]
-            if not res_del.empty:
-                st.warning(f"Atenção: {len(res_del)} linhas serão apagadas.")
+        st.subheader("🗑️ Apagar Lote")
+        lote_d = st.text_input("Lote para EXCLUIR:", key="del_in")
+        if lote_d:
+            res_d = df_hist[df_hist['lote'].astype(str) == lote_d]
+            if not res_d.empty:
+                st.warning(f"Apagando {len(res_d)} linhas.")
                 st.markdown('<div class="btn-delete">', unsafe_allow_html=True)
-                if st.button(f"🚨 EXCLUIR LOTE {lote_del}"):
-                    df_hist = df_hist[df_hist['lote'].astype(str) != lote_del]
-                    salvar_csv(df_hist, "Historico_Producao.csv")
-                    st.error("Lote excluído."); time.sleep(1.2); st.rerun()
+                if st.button(f"🚨 EXCLUIR {lote_d}"):
+                    df_hist = df_hist[df_hist['lote'].astype(str) != lote_d]
+                    salvar_csv(df_hist, "Historico_Producao.csv"); st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
 
 # --- DEMAIS ABAS ---
-elif aba == "📋 Padrões Registrados":
-    st.title("📋 Padrões Registrados")
-    st.dataframe(df_padr, use_container_width=True)
-    if not df_padr.empty and st.button("Limpar Lista"):
-        salvar_csv(pd.DataFrame(columns=["Data", "Produto", "Cor", "Lote", "Status"]), "Padroes_Registrados.csv"); st.rerun()
-
-elif aba == "➕ Cadastro de Produtos":
-    st.title("➕ Novo Pigmento")
-    with st.form("f_cad"):
-        c1, c2 = st.columns(2)
-        t = c1.text_input("Tipo"); p = c1.text_input("Pigmento"); cor = c2.text_input("Cor"); coef = c2.number_input("Coef (kg/L)", format="%.6f")
-        if st.form_submit_button("Cadastrar"):
-            if t and cor and p:
-                n = pd.DataFrame([{"Tipo": t.title(), "Cor": cor.title(), "Pigmento": p.title(), "Quant OP (kg)": coef}])
-                df_mestra = pd.concat([df_mestra, n], ignore_index=True); salvar_csv(df_mestra, "Aba_Mestra.csv"); st.success("Salvo!"); time.sleep(1); st.rerun()
-
 elif aba == "📊 Editor Aba Mestra":
     ed = st.data_editor(df_mestra, num_rows="dynamic")
     if st.button("Salvar Alterações"): salvar_csv(ed, "Aba_Mestra.csv"); st.success("Atualizado!")
@@ -232,4 +225,6 @@ elif aba == "📊 Editor Aba Mestra":
 elif aba == "📂 Importar CSV":
     up = st.file_uploader("CSV", type="csv")
     alvo = st.selectbox("Destino", ["Aba_Mestra.csv", "Historico_Producao.csv", "Padroes_Registrados.csv"])
-    if up and st.button("Importar"): salvar_csv(pd.read_csv(up, encoding='latin-1', sep=None, engine='python'), alvo); st.rerun()
+    if up and st.button("Importar"): 
+        df_imp = pd.read_csv(up, encoding='latin-1', sep=None, engine='python')
+        salvar_csv(df_imp, alvo); st.success("Importado!"); time.sleep(1); st.rerun()
