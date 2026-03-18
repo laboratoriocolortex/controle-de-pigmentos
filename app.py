@@ -159,16 +159,16 @@ elif aba == "📈 Gráficos CEP":
             st.subheader("📋 Dados Brutos Filtrados")
             df_cep_table = df_plot.drop(columns=['data_dt', 'OP_g'], errors='ignore').copy()
             
-            # Formatação específica solicitada
             if 'Quantidade OP' in df_cep_table.columns:
                 df_cep_table['Quantidade OP'] = df_cep_table['Quantidade OP'].map('{:.5f}'.format)
             if 'Desvio (g)' in df_cep_table.columns:
-                df_cep_table['Desvio (g)'] = df_cep_table['Desvio (g)'].map('{:.1f}'.format) # Apenas 1 casa decimal
+                df_cep_table['Desvio (g)'] = pd.to_numeric(df_cep_table['Desvio (g)'], errors='coerce').map('{:.1f}'.format)
                 
             st.dataframe(df_cep_table, use_container_width=True)
             
             csv_data = df_plot.to_csv(index=False).encode('utf-8-sig')
-            st.download_button("📥 Baixar Relatório (CSV)", data=csv_data, file_name=f"CEP_{p_sel}_{cor_sel}.csv", mime="text/csv")
+            # CORREÇÃO DO NameError: Usando as variáveis p_sel e c_sel definidas acima
+            st.download_button(label="📥 Baixar Relatório (CSV)", data=csv_data, file_name=f"CEP_{p_sel}_{c_sel}.csv", mime="text/csv")
         else:
             st.warning("Sem registros para os filtros selecionados.")
 
