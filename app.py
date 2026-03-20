@@ -110,30 +110,25 @@ if aba == "🚀 Registro":
                 st.session_state.df_hist = novo_h
 
                 if check_padrão:
-                    # 1. Registro na Tabela de Padrões
+                    # Registro na Tabela de Padrões
                     n_p_reg = pd.DataFrame([{"Data": data_f.strftime("%d/%m/%Y"), "Produto": t_sel, "Cor": cor_sel, "Lote": lote_id, "Status": "Padrão"}])
                     st.session_state.df_padr = pd.concat([st.session_state.df_padr, n_p_reg], ignore_index=True)
                     salvar_csv(st.session_state.df_padr, "Padroes_Registrados.csv")
 
-                    # 2. Sincronização com Aba Mestra (Recalculando kg/L)
+                    # Atualiza Aba Mestra
                     vol_real_total = n_r * litros_u
                     for _, r in df_atual.iterrows():
                         novo_coef = (r['Quant ad (g)'] / 1000) / vol_real_total if vol_real_total > 0 else 0
-                        
                         mask = (st.session_state.df_mestra['Tipo'] == t_sel) & \
                                (st.session_state.df_mestra['Cor'] == cor_sel) & \
                                (st.session_state.df_mestra['Pigmento'] == r['pigmento'])
-                        
-                        if mask.any():
-                            st.session_state.df_mestra.loc[mask, 'Quant OP (kg)'] = novo_coef
+                        if mask.any(): st.session_state.df_mestra.loc[mask, 'Quant OP (kg)'] = novo_coef
                         else:
                             nova_lin = pd.DataFrame([{'Tipo': t_sel, 'Cor': cor_sel, 'Pigmento': r['pigmento'], 'Quant OP (kg)': novo_coef}])
                             st.session_state.df_mestra = pd.concat([st.session_state.df_mestra, nova_lin], ignore_index=True)
-                    
                     salvar_csv(st.session_state.df_mestra, "Aba_Mestra.csv")
-                    st.success("Padrão Validado e Aba Mestra Atualizada!")
-                
-                st.success("Lote registrado com sucesso!"); st.balloons(); time.sleep(1); st.rerun()
+
+                st.success("Lote registrado!"); st.balloons(); time.sleep(1); st.rerun()
 
 # --- 📈 ABA: GRÁFICOS CEP ---
 elif aba == "📈 Controle":
@@ -153,9 +148,35 @@ elif aba == "📈 Controle":
             df_plot['Situação'] = df_plot.apply(lambda r: "⚠️ Fora" if abs(r['Var %']) > 10 else "✅ Ok", axis=1)
             st.dataframe(df_plot[['data', 'lote', 'pigmento', 'Especificado (g)', 'Quant ad (g)', 'Desvio (g)', 'Situação']], use_container_width=True)
 
-# --- 📜 BANCO DE DADOS ---
+# --- 📜 BANCO DE DADOS (RESTAURADO) ---
 elif aba == "📜 Banco de Dados":
     st.title("📜 Gestão de Dados")
+    
+    # BLOCO RESTAURADO: Registrar Lote como Padrão
+    with st.expander("🌟 Registrar Lote Existente como Padrão"):
+        l_busca = st.text_input("Número do Lote para Homologar:")
+        if st.button("Confirmar e Atualizar Mestra") and l_busca:
+            l_data = st.session_state.df_hist[st.session_state.df_hist['lote'].astype(str) == l_busca]
+            if not l_data.empty:
+                t_prod = l_data.iloc[0]['tipo de produto']
+                cor_prod = l_data.iloc[0]['cor']
+                # Atualiza Padrões
+                n_p = pd.DataFrame([{"Data": l_data.iloc[0]['data'], "Produto": t_prod, "Cor": cor_prod, "Lote": l_busca, "Status": "Padrão"}])
+                st.session_state.df_padr = pd.concat([st.session_state.df_padr, n_p], ignore_index=True)
+                salvar_csv(st.session_state.df_padr, "Padroes_Registrados.csv")
+                
+                # Sincroniza com Aba Mestra (Lógica kg/L)
+                for _, r in l_data.iterrows():
+                    vol_real = r['#Real'] * r['Litros/Unit']
+                    novo_coef = (r['Quant ad (g)'] / 1000) / vol_real if vol_real > 0 else 0
+                    mask = (st.session_state.df_mestra['Tipo'] == t_prod) & \
+                           (st.session_state.df_mestra['Cor'] == cor_prod) & \
+                           (st.session_state.df_mestra['Pigmento'] == r['pigmento'])
+                    if mask.any(): st.session_state.df_mestra.loc[mask, 'Quant OP (kg)'] = novo_coef
+                salvar_csv(st.session_state.df_mestra, "Aba_Mestra.csv")
+                st.success(f"Lote {l_busca} homologado como novo padrão na Aba Mestra!"); time.sleep(1); st.rerun()
+            else: st.error("Lote não encontrado no histórico.")
+
     ed_h = st.data_editor(st.session_state.df_hist, num_rows="dynamic", use_container_width=True)
     c1, c2 = st.columns(2)
     if c1.button("💾 Salvar Alterações"):
@@ -169,17 +190,19 @@ elif aba == "📜 Banco de Dados":
 # --- DEMAIS ABAS ---
 elif aba == "📋 Padrões":
     st.title("📋 Histórico de Padrões")
-    st.data_editor(st.session_state.df_padr, num_rows="dynamic", use_container_width=True)
+    ed_p = st.data_editor(st.session_state.df_padr, num_rows="dynamic", use_container_width=True)
+    if st.button("Salvar Padrões"):
+        salvar_csv(ed_p, "Padroes_Registrados.csv"); st.session_state.df_padr = ed_p; st.success("Salvo!")
 
 elif aba == "📊 Aba Mestra":
-    st.title("📊 Aba Mestra (kg/L)")
+    st.title("📊 Editor Aba Mestra (kg/L)")
     ed_m = st.data_editor(st.session_state.df_mestra, num_rows="dynamic", use_container_width=True)
     if st.button("💾 Salvar Mestra"):
         salvar_csv(ed_m, "Aba_Mestra.csv"); st.session_state.df_mestra = ed_m; st.success("Salvo!")
 
 elif aba == "📂 Importar CSV":
     st.title("📂 Importação / Exportação")
-    st.download_button("Baixar Backup", st.session_state.df_hist.to_csv(index=False, sep=';', encoding='utf-8-sig'), "Backup_Producao.csv")
+    st.download_button("Baixar Backup", st.session_state.df_hist.to_csv(index=False, sep=';', encoding='utf-8-sig'), "Producao_Colortex.csv")
     up = st.file_uploader("Subir CSV", type="csv")
     alvo = st.selectbox("Destino", ["Aba_Mestra.csv", "Historico_Producao.csv", "Padroes_Registrados.csv"])
     if up and st.button("🚀 Confirmar"):
