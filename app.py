@@ -4,6 +4,7 @@ import numpy as np
 import os
 import time
 from datetime import datetime, date
+import io
 
 # 1. Configuração de Layout
 st.set_page_config(page_title="Colortex 2026 - Gestão de R&D", layout="wide", page_icon="🧪")
@@ -17,17 +18,24 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 🛡️ FUNÇÕES DE TRATAMENTO (Ajustadas para Excel Brasileiro) ---
+# --- 🛡️ FUNÇÃO DE CARREGAMENTO CORRIGIDA (Resolve o erro da linha 22) ---
 def carregar_dados_blindado(arquivo_ou_buffer):
-    if not os.path.exists(arquivo_ou_buffer) and isinstance(arquivo_ou_buffer, str):
-        if "Mestra" in arquivo_ou_buffer:
-            return pd.DataFrame(columns=['Tipo', 'Cor', 'Pigmento', 'Quant OP (kg)'])
-        return pd.DataFrame()
+    # Se for uma string (nome de arquivo local), verifica se existe
+    if isinstance(arquivo_ou_buffer, str):
+        if not os.path.exists(arquivo_ou_buffer):
+            if "Mestra" in arquivo_ou_buffer:
+                return pd.DataFrame(columns=['Tipo', 'Cor', 'Pigmento', 'Quant OP (kg)'])
+            return pd.DataFrame()
+    
     try:
-        # Detecta automaticamente se o separador é , ou ;
+        # Lê o arquivo (seja buffer de upload ou arquivo local)
+        # sep=None detecta automaticamente se é vírgula ou ponto e vírgula
         df = pd.read_csv(arquivo_ou_buffer, sep=None, engine='python', encoding='utf-8-sig')
+        
+        # Limpeza de nomes de colunas
         df.columns = [str(c).replace('\ufeff', '').strip() for c in df.columns]
         
+        # Padroniza textos e números
         for col in df.columns:
             if df[col].dtype == 'object':
                 df[col] = df[col].astype(str).str.strip()
@@ -36,15 +44,15 @@ def carregar_dados_blindado(arquivo_ou_buffer):
         for col in cols_num:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '.'), errors='coerce').fillna(0.0)
+        
         return df.dropna(how='all')
-    except:
+    except Exception as e:
         return pd.DataFrame()
 
 def salvar_csv(df, arquivo):
-    # Remove apenas colunas de cálculo dinâmico para o CSV ficar limpo
     cols_calc = ['Desvio (g)', 'Var %', 'Situação', 'Meta_Tot_g']
     df_save = df.drop(columns=[c for c in cols_calc if c in df.columns], errors='ignore').copy()
-    # SALVA COM PONTO E VÍRGULA (;) PARA ABRIR DIRETO EM COLUNAS NO EXCEL
+    # Salva com o padrão do Excel brasileiro (;)
     df_save.to_csv(arquivo, index=False, sep=';', encoding='utf-8-sig')
 
 # --- CARREGAMENTO INICIAL ---
@@ -59,7 +67,7 @@ if 'df_padr' not in st.session_state:
 menu = ["🚀 Produção", "📈 Gráficos CEP", "📜 Banco de Dados", "📋 Padrões Registrados", "📊 Editor Aba Mestra", "📂 Importar CSV"]
 aba = st.sidebar.radio("Navegação:", menu)
 
-# --- 🚀 ABA: PRODUÇÃO ---
+# --- 🚀 ABA: PRODUÇÃO (Mantendo a estrutura de R&D) ---
 if aba == "🚀 Produção":
     st.title("🚀 Registro de Pesagem")
     if st.session_state.df_mestra.empty:
@@ -84,7 +92,7 @@ if aba == "🚀 Produção":
         regs = []
         for i, row in formula.iterrows():
             pigm = row['Pigmento']
-            coef = float(row.get('Quant OP (kg)', row.get('Quantidade OP', 0)))
+            coef = float(row.get('Quant OP (kg)', 0))
             sug_g = round(coef * n_p * litros_u * 1000, 2)
             
             with st.container():
@@ -118,15 +126,14 @@ if aba == "🚀 Produção":
                     salvar_csv(st.session_state.df_padr, "Padroes_Registrados.csv")
                 st.success("Salvo!"); st.balloons(); time.sleep(1); st.rerun()
 
-# --- 📈 ABA: GRÁFICOS CEP ---
+# --- 📈 ABA: GRÁFICOS CEP (Mantendo os filtros e emojis) ---
 elif aba == "📈 Gráficos CEP":
     st.title("📈 Dashboard de Qualidade")
-    if st.session_state.df_hist.empty: st.info("Sem dados no histórico.")
+    if st.session_state.df_hist.empty: st.info("Sem dados.")
     else:
         c1, c2 = st.columns(2)
         p_sel = c1.selectbox("Produto", sorted(st.session_state.df_hist['tipo de produto'].unique()))
         c_sel = c2.selectbox("Cor", sorted(st.session_state.df_hist[st.session_state.df_hist['tipo de produto'] == p_sel]['cor'].unique()))
-        
         df_plot = st.session_state.df_hist[(st.session_state.df_hist['tipo de produto'] == p_sel) & (st.session_state.df_hist['cor'] == c_sel)].copy()
         
         if not df_plot.empty:
@@ -137,11 +144,11 @@ elif aba == "📈 Gráficos CEP":
             df_plot['Situação'] = df_plot.apply(lambda r: "⚠️ Fora" if r['Var %'] > 10 else "✅ Ok", axis=1)
             st.dataframe(df_plot[['data', 'lote', 'pigmento', 'Meta_Tot_g', 'Quant ad (g)', 'Desvio (g)', 'Situação']], use_container_width=True)
 
-# --- 📜 BANCO DE DADOS ---
+# --- 📜 BANCO DE DADOS (Mantendo a exclusão e busca de padrão) ---
 elif aba == "📜 Banco de Dados":
-    st.title("📜 Gestão do Banco de Dados")
+    st.title("📜 Gestão de Dados")
     with st.expander("🌟 Registrar Lote Existente como Padrão"):
-        l_busca = st.text_input("Número do Lote para Padrão:")
+        l_busca = st.text_input("Número do Lote:")
         if st.button("Confirmar Padrão") and l_busca:
             l_data = st.session_state.df_hist[st.session_state.df_hist['lote'].astype(str) == l_busca]
             if not l_data.empty:
@@ -152,14 +159,34 @@ elif aba == "📜 Banco de Dados":
     ed_h = st.data_editor(st.session_state.df_hist, num_rows="dynamic", use_container_width=True)
     c_s1, c_s2 = st.columns(2)
     if c_s1.button("💾 Salvar Alterações"):
-        salvar_csv(ed_h, "Historico_Producao.csv"); st.session_state.df_hist = ed_h; st.success("Banco Atualizado!"); st.rerun()
+        salvar_csv(ed_h, "Historico_Producao.csv"); st.session_state.df_hist = ed_h; st.success("Salvo!"); st.rerun()
     with c_s2:
         l_del = st.text_input("Lote para EXCLUIR:")
-        if st.button("❌ EXCLUIR LOTE DEFINITIVAMENTE"):
+        if st.button("❌ EXCLUIR LOTE"):
             st.session_state.df_hist = st.session_state.df_hist[st.session_state.df_hist['lote'].astype(str) != l_del]
-            salvar_csv(st.session_state.df_hist, "Historico_Producao.csv"); st.warning(f"Lote {l_del} removido."); time.sleep(1); st.rerun()
+            salvar_csv(st.session_state.df_hist, "Historico_Producao.csv"); st.warning("Lote removido."); time.sleep(1); st.rerun()
 
-# --- DEMAIS ABAS ---
+# --- 📂 ABA: IMPORTAR CSV (Com download para Excel direto) ---
+elif aba == "📂 Importar CSV":
+    st.title("📂 Importação / Exportação")
+    st.subheader("⬇️ Baixar Backup para Excel")
+    c1, c2 = st.columns(2)
+    c1.download_button("Baixar Aba Mestra", st.session_state.df_mestra.to_csv(index=False, sep=';', encoding='utf-8-sig'), "Aba_Mestra.csv")
+    c2.download_button("Baixar Histórico", st.session_state.df_hist.to_csv(index=False, sep=';', encoding='utf-8-sig'), "Historico_Producao.csv")
+    
+    st.divider()
+    st.subheader("⬆️ Subir Novo Arquivo")
+    up = st.file_uploader("Selecione o arquivo CSV", type="csv")
+    alvo = st.selectbox("Destino", ["Aba_Mestra.csv", "Historico_Producao.csv", "Padroes_Registrados.csv"])
+    if up and st.button("🚀 Confirmar Importação"):
+        df_imp = carregar_dados_blindado(up)
+        if not df_imp.empty:
+            salvar_csv(df_imp, alvo)
+            if alvo == "Aba_Mestra.csv": st.session_state.df_mestra = df_imp
+            elif alvo == "Historico_Producao.csv": st.session_state.df_hist = df_imp
+            st.success("Importado com sucesso!"); time.sleep(1); st.rerun()
+
+# --- ABAS DE EDIÇÃO ---
 elif aba == "📋 Padrões Registrados":
     st.title("📋 Padrões")
     ed_p = st.data_editor(st.session_state.df_padr, num_rows="dynamic", use_container_width=True)
@@ -171,13 +198,3 @@ elif aba == "📊 Editor Aba Mestra":
     ed_m = st.data_editor(st.session_state.df_mestra, num_rows="dynamic", use_container_width=True)
     if st.button("Salvar Mestra"):
         salvar_csv(ed_m, "Aba_Mestra.csv"); st.session_state.df_mestra = ed_m; st.success("Salvo!")
-
-elif aba == "📂 Importar CSV":
-    st.title("📂 Importação / Exportação")
-    st.download_button("📥 Baixar Backup Aba Mestra", st.session_state.df_mestra.to_csv(index=False, sep=';', encoding='utf-8-sig'), "Aba_Mestra.csv")
-    st.divider()
-    up = st.file_uploader("Subir CSV Higienizado", type="csv")
-    alvo = st.selectbox("Destino", ["Aba_Mestra.csv", "Historico_Producao.csv", "Padroes_Registrados.csv"])
-    if up and st.button("🚀 Confirmar Importação"):
-        df_imp = carregar_dados_blindado(up)
-        salvar_csv(df_imp, alvo); st.success("Importado!"); time.sleep(1); st.rerun()
