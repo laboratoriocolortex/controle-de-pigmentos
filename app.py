@@ -4,7 +4,6 @@ import numpy as np
 import os
 import time
 from datetime import datetime, date
-import io
 
 # 1. Configuração de Layout
 st.set_page_config(page_title="Colortex 2026 - Gestão de R&D", layout="wide", page_icon="🧪")
@@ -18,41 +17,30 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 🛡️ FUNÇÃO DE CARREGAMENTO CORRIGIDA (Resolve o erro da linha 22) ---
+# --- 🛡️ FUNÇÕES DE TRATAMENTO ---
 def carregar_dados_blindado(arquivo_ou_buffer):
-    # Se for uma string (nome de arquivo local), verifica se existe
-    if isinstance(arquivo_ou_buffer, str):
-        if not os.path.exists(arquivo_ou_buffer):
-            if "Mestra" in arquivo_ou_buffer:
-                return pd.DataFrame(columns=['Tipo', 'Cor', 'Pigmento', 'Quant OP (kg)'])
-            return pd.DataFrame()
-    
+    if isinstance(arquivo_ou_buffer, str) and not os.path.exists(arquivo_ou_buffer):
+        if "Mestra" in arquivo_ou_buffer:
+            return pd.DataFrame(columns=['Tipo', 'Cor', 'Pigmento', 'Quant OP (kg)'])
+        return pd.DataFrame()
     try:
-        # Lê o arquivo (seja buffer de upload ou arquivo local)
-        # sep=None detecta automaticamente se é vírgula ou ponto e vírgula
         df = pd.read_csv(arquivo_ou_buffer, sep=None, engine='python', encoding='utf-8-sig')
-        
-        # Limpeza de nomes de colunas
         df.columns = [str(c).replace('\ufeff', '').strip() for c in df.columns]
-        
-        # Padroniza textos e números
         for col in df.columns:
             if df[col].dtype == 'object':
                 df[col] = df[col].astype(str).str.strip()
-            
         cols_num = ['Quantidade OP', 'Quant ad (g)', '#Plan', 'Litros/Unit', 'Quant OP (kg)']
         for col in cols_num:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '.'), errors='coerce').fillna(0.0)
-        
         return df.dropna(how='all')
-    except Exception as e:
+    except:
         return pd.DataFrame()
 
 def salvar_csv(df, arquivo):
-    cols_calc = ['Desvio (g)', 'Var %', 'Situação', 'Meta_Tot_g']
+    # Colunas removidas apenas na escrita do CSV para manter o arquivo limpo
+    cols_calc = ['Desvio (g)', 'Var %', 'Situação', 'Especificado (g)', 'Meta_Tot_g']
     df_save = df.drop(columns=[c for c in cols_calc if c in df.columns], errors='ignore').copy()
-    # Salva com o padrão do Excel brasileiro (;)
     df_save.to_csv(arquivo, index=False, sep=';', encoding='utf-8-sig')
 
 # --- CARREGAMENTO INICIAL ---
@@ -67,11 +55,11 @@ if 'df_padr' not in st.session_state:
 menu = ["🚀 Produção", "📈 Gráficos CEP", "📜 Banco de Dados", "📋 Padrões Registrados", "📊 Editor Aba Mestra", "📂 Importar CSV"]
 aba = st.sidebar.radio("Navegação:", menu)
 
-# --- 🚀 ABA: PRODUÇÃO (Mantendo a estrutura de R&D) ---
+# --- 🚀 ABA: PRODUÇÃO ---
 if aba == "🚀 Produção":
     st.title("🚀 Registro de Pesagem")
     if st.session_state.df_mestra.empty:
-        st.warning("⚠️ Aba Mestra vazia.")
+        st.warning("Aba Mestra vazia.")
     else:
         c1, c2, c3, c4 = st.columns([1.5, 1.5, 1, 1])
         t_sel = c1.selectbox("Produto", sorted(st.session_state.df_mestra['Tipo'].unique()))
@@ -92,12 +80,13 @@ if aba == "🚀 Produção":
         regs = []
         for i, row in formula.iterrows():
             pigm = row['Pigmento']
-            coef = float(row.get('Quant OP (kg)', 0))
-            sug_g = round(coef * n_p * litros_u * 1000, 2)
+            coef_kg_l = float(row.get('Quant OP (kg)', row.get('Quantidade OP', 0)))
+            # CÁLCULO CORRIGIDO: (kg/L * 1000) * Volume Total
+            espec_g = round((coef_kg_l * 1000) * (n_p * litros_u), 2)
             
             with st.container():
                 col_i, col_p = st.columns([1.5, 3.5])
-                col_i.subheader(pigm); col_i.write(f"Meta: {sug_g}g")
+                col_i.subheader(pigm); col_i.write(f"Espec: {espec_g}g")
                 n_t = col_i.number_input(f"Toques", min_value=1, value=1, key=f"nt_{i}")
                 
                 s_ad = 0.0
@@ -110,7 +99,7 @@ if aba == "🚀 Produção":
             regs.append({
                 "data": data_f.strftime("%d/%m/%Y"), "lote": lote_id, "tipo de produto": t_sel,
                 "cor": cor_sel, "pigmento": pigm, "Quant ad (g)": s_ad,
-                "Quantidade OP": coef, "#Plan": n_p, "#Real": n_r, "Litros/Unit": litros_u
+                "Quantidade OP": coef_kg_l, "#Plan": n_p, "#Real": n_r, "Litros/Unit": litros_u
             })
             st.divider()
 
@@ -121,15 +110,15 @@ if aba == "🚀 Produção":
                 salvar_csv(novo_h, "Historico_Producao.csv")
                 st.session_state.df_hist = novo_h
                 if check_padrão:
-                    n_padr = pd.DataFrame([{"Data": data_f.strftime("%d/%m/%Y"), "Produto": t_sel, "Cor": cor_sel, "Lote": lote_id, "Status": "Padrão"}])
-                    st.session_state.df_padr = pd.concat([st.session_state.df_padr, n_padr], ignore_index=True)
+                    n_p = pd.DataFrame([{"Data": data_f.strftime("%d/%m/%Y"), "Produto": t_sel, "Cor": cor_sel, "Lote": lote_id, "Status": "Padrão"}])
+                    st.session_state.df_padr = pd.concat([st.session_state.df_padr, n_p], ignore_index=True)
                     salvar_csv(st.session_state.df_padr, "Padroes_Registrados.csv")
-                st.success("Salvo!"); st.balloons(); time.sleep(1); st.rerun()
+                st.success("Salvo!"); time.sleep(1); st.rerun()
 
-# --- 📈 ABA: GRÁFICOS CEP (Mantendo os filtros e emojis) ---
+# --- 📈 ABA: GRÁFICOS CEP ---
 elif aba == "📈 Gráficos CEP":
     st.title("📈 Dashboard de Qualidade")
-    if st.session_state.df_hist.empty: st.info("Sem dados.")
+    if st.session_state.df_hist.empty: st.info("Sem dados no histórico.")
     else:
         c1, c2 = st.columns(2)
         p_sel = c1.selectbox("Produto", sorted(st.session_state.df_hist['tipo de produto'].unique()))
@@ -137,56 +126,31 @@ elif aba == "📈 Gráficos CEP":
         df_plot = st.session_state.df_hist[(st.session_state.df_hist['tipo de produto'] == p_sel) & (st.session_state.df_hist['cor'] == c_sel)].copy()
         
         if not df_plot.empty:
-            df_plot['Meta_Tot_g'] = df_plot['Quantidade OP'] * df_plot['#Plan'] * df_plot['Litros/Unit'] * 1000
-            df_plot['Desvio (g)'] = df_plot['Quant ad (g)'] - df_plot['Meta_Tot_g']
-            df_plot['Var %'] = ((df_plot['Quant ad (g)'] / df_plot['Meta_Tot_g'].replace(0, np.nan)) - 1) * 100
+            # CÁLCULO CORRIGIDO: (kg/L * 1000) * volume total
+            df_plot['Especificado (g)'] = (df_plot['Quantidade OP'] * 1000 * df_plot['#Plan'] * df_plot['Litros/Unit']).round(2)
+            df_plot['Desvio (g)'] = df_plot['Quant ad (g)'] - df_plot['Especificado (g)']
+            df_plot['Var %'] = ((df_plot['Quant ad (g)'] / df_plot['Especificado (g)'].replace(0, np.nan)) - 1) * 100
+            
+            st.subheader(f"Variação de Pigmentos (%)")
             st.line_chart(df_plot.pivot_table(index='lote', columns='pigmento', values='Var %'))
-            df_plot['Situação'] = df_plot.apply(lambda r: "⚠️ Fora" if r['Var %'] > 10 else "✅ Ok", axis=1)
-            st.dataframe(df_plot[['data', 'lote', 'pigmento', 'Meta_Tot_g', 'Quant ad (g)', 'Desvio (g)', 'Situação']], use_container_width=True)
+            
+            df_plot['Situação'] = df_plot.apply(lambda r: "⚠️ Fora" if abs(r['Var %']) > 10 else "✅ Ok", axis=1)
+            st.dataframe(df_plot[['data', 'lote', 'pigmento', 'Especificado (g)', 'Quant ad (g)', 'Desvio (g)', 'Situação']], use_container_width=True)
 
-# --- 📜 BANCO DE DADOS (Mantendo a exclusão e busca de padrão) ---
+# --- 📜 BANCO DE DADOS ---
 elif aba == "📜 Banco de Dados":
     st.title("📜 Gestão de Dados")
-    with st.expander("🌟 Registrar Lote Existente como Padrão"):
-        l_busca = st.text_input("Número do Lote:")
-        if st.button("Confirmar Padrão") and l_busca:
-            l_data = st.session_state.df_hist[st.session_state.df_hist['lote'].astype(str) == l_busca]
-            if not l_data.empty:
-                n_p = pd.DataFrame([{"Data": l_data.iloc[0]['data'], "Produto": l_data.iloc[0]['tipo de produto'], "Cor": l_data.iloc[0]['cor'], "Lote": l_busca, "Status": "Padrão"}])
-                st.session_state.df_padr = pd.concat([st.session_state.df_padr, n_p], ignore_index=True)
-                salvar_csv(st.session_state.df_padr, "Padroes_Registrados.csv"); st.success("Padrão Registrado!")
-
     ed_h = st.data_editor(st.session_state.df_hist, num_rows="dynamic", use_container_width=True)
-    c_s1, c_s2 = st.columns(2)
-    if c_s1.button("💾 Salvar Alterações"):
-        salvar_csv(ed_h, "Historico_Producao.csv"); st.session_state.df_hist = ed_h; st.success("Salvo!"); st.rerun()
-    with c_s2:
+    c1, c2 = st.columns(2)
+    if c1.button("💾 Salvar Alterações"):
+        salvar_csv(ed_h, "Historico_Producao.csv"); st.session_state.df_hist = ed_h; st.success("Banco Atualizado!")
+    with c2:
         l_del = st.text_input("Lote para EXCLUIR:")
         if st.button("❌ EXCLUIR LOTE"):
             st.session_state.df_hist = st.session_state.df_hist[st.session_state.df_hist['lote'].astype(str) != l_del]
-            salvar_csv(st.session_state.df_hist, "Historico_Producao.csv"); st.warning("Lote removido."); time.sleep(1); st.rerun()
+            salvar_csv(st.session_state.df_hist, "Historico_Producao.csv"); st.rerun()
 
-# --- 📂 ABA: IMPORTAR CSV (Com download para Excel direto) ---
-elif aba == "📂 Importar CSV":
-    st.title("📂 Importação / Exportação")
-    st.subheader("⬇️ Baixar Backup para Excel")
-    c1, c2 = st.columns(2)
-    c1.download_button("Baixar Aba Mestra", st.session_state.df_mestra.to_csv(index=False, sep=';', encoding='utf-8-sig'), "Aba_Mestra.csv")
-    c2.download_button("Baixar Histórico", st.session_state.df_hist.to_csv(index=False, sep=';', encoding='utf-8-sig'), "Historico_Producao.csv")
-    
-    st.divider()
-    st.subheader("⬆️ Subir Novo Arquivo")
-    up = st.file_uploader("Selecione o arquivo CSV", type="csv")
-    alvo = st.selectbox("Destino", ["Aba_Mestra.csv", "Historico_Producao.csv", "Padroes_Registrados.csv"])
-    if up and st.button("🚀 Confirmar Importação"):
-        df_imp = carregar_dados_blindado(up)
-        if not df_imp.empty:
-            salvar_csv(df_imp, alvo)
-            if alvo == "Aba_Mestra.csv": st.session_state.df_mestra = df_imp
-            elif alvo == "Historico_Producao.csv": st.session_state.df_hist = df_imp
-            st.success("Importado com sucesso!"); time.sleep(1); st.rerun()
-
-# --- ABAS DE EDIÇÃO ---
+# --- DEMAIS ABAS ---
 elif aba == "📋 Padrões Registrados":
     st.title("📋 Padrões")
     ed_p = st.data_editor(st.session_state.df_padr, num_rows="dynamic", use_container_width=True)
@@ -194,7 +158,17 @@ elif aba == "📋 Padrões Registrados":
         salvar_csv(ed_p, "Padroes_Registrados.csv"); st.session_state.df_padr = ed_p; st.success("Salvo!")
 
 elif aba == "📊 Editor Aba Mestra":
-    st.title("📊 Editor Aba Mestra")
+    st.title("📊 Editor Aba Mestra (kg/L)")
     ed_m = st.data_editor(st.session_state.df_mestra, num_rows="dynamic", use_container_width=True)
     if st.button("Salvar Mestra"):
         salvar_csv(ed_m, "Aba_Mestra.csv"); st.session_state.df_mestra = ed_m; st.success("Salvo!")
+
+elif aba == "📂 Importar CSV":
+    st.title("📂 Importação / Exportação")
+    st.download_button("Baixar Backup Atual", st.session_state.df_hist.to_csv(index=False, sep=';', encoding='utf-8-sig'), "Producao_Colortex.csv")
+    st.divider()
+    up = st.file_uploader("Subir CSV", type="csv")
+    alvo = st.selectbox("Destino", ["Aba_Mestra.csv", "Historico_Producao.csv", "Padroes_Registrados.csv"])
+    if up and st.button("🚀 Confirmar Importação"):
+        df_imp = carregar_dados_blindado(up)
+        salvar_csv(df_imp, alvo); st.success("Importado!"); time.sleep(1); st.rerun()
