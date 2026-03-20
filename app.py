@@ -51,12 +51,12 @@ if 'df_padr' not in st.session_state:
     st.session_state.df_padr = carregar_dados_blindado("Padroes_Registrados.csv")
 
 # --- NAVEGAÇÃO ---
-menu = ["🚀 Produção", "📈 Gráficos CEP", "📜 Banco de Dados", "📋 Padrões Registrados", "📊 Editor Aba Mestra", "📂 Importar CSV"]
+menu = ["🚀 Registro", "📈 Controle", "📜 Banco de Dados", "📋 Padrões", "📊 Aba Mestra", "📂 Importar CSV"]
 aba = st.sidebar.radio("Navegação:", menu)
 
 # --- 🚀 ABA: PRODUÇÃO ---
-if aba == "🚀 Produção":
-    st.title("🚀 Registro de Pesagem")
+if aba == "🚀 Registro":
+    st.title("🚀 Registro de Pigmentação")
     if st.session_state.df_mestra.empty:
         st.warning("Aba Mestra vazia.")
     else:
@@ -71,7 +71,7 @@ if aba == "🚀 Produção":
         n_r = v2.number_input("# Unid Real", min_value=1, value=1)
         sel_v = v3.select_slider("Embalagem:", options=["0,9L", "3,6L", "15L", "18L", "25kg", "Outro"], value="15L")
         litros_u = float(sel_v.replace('L','').replace('kg','').replace(',','.')) if sel_v != "Outro" else v3.number_input("Valor Unit:", value=15.0)
-        check_padrão = v4.checkbox("🌟 Definir como Novo Padrão (Atualiza Mestra)")
+        check_padrão = v4.checkbox("🌟 Definir como Novo Padrão")
 
         formula = st.session_state.df_mestra[(st.session_state.df_mestra['Tipo'] == t_sel) & (st.session_state.df_mestra['Cor'] == cor_sel)]
         st.divider()
@@ -136,7 +136,7 @@ if aba == "🚀 Produção":
                 st.success("Lote registrado com sucesso!"); st.balloons(); time.sleep(1); st.rerun()
 
 # --- 📈 ABA: GRÁFICOS CEP ---
-elif aba == "📈 Gráficos CEP":
+elif aba == "📈 Controle":
     st.title("📈 Dashboard de Qualidade")
     if st.session_state.df_hist.empty: st.info("Sem dados.")
     else:
@@ -167,12 +167,12 @@ elif aba == "📜 Banco de Dados":
             salvar_csv(st.session_state.df_hist, "Historico_Producao.csv"); st.rerun()
 
 # --- DEMAIS ABAS ---
-elif aba == "📋 Padrões Registrados":
+elif aba == "📋 Padrões":
     st.title("📋 Histórico de Padrões")
     st.data_editor(st.session_state.df_padr, num_rows="dynamic", use_container_width=True)
 
-elif aba == "📊 Editor Aba Mestra":
-    st.title("📊 Editor Aba Mestra (kg/L)")
+elif aba == "📊 Aba Mestra":
+    st.title("📊 Aba Mestra (kg/L)")
     ed_m = st.data_editor(st.session_state.df_mestra, num_rows="dynamic", use_container_width=True)
     if st.button("💾 Salvar Mestra"):
         salvar_csv(ed_m, "Aba_Mestra.csv"); st.session_state.df_mestra = ed_m; st.success("Salvo!")
