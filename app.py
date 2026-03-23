@@ -89,6 +89,7 @@ if aba == "🚀 Registro":
         regs = []
         for i, row in formula.iterrows():
             coef = float(row['Quant OP (kg)'])
+            # CÁLCULO DA OP EM GRAMAS (Coef * 1000 * Volume Planejado)
             espec_g = round((coef * 1000) * (n_p * litros_u), 2)
             
             with st.container():
@@ -105,7 +106,8 @@ if aba == "🚀 Registro":
             regs.append({
                 "data": data_f.strftime("%d/%m/%Y"), "lote": lote_id, "tipo de produto": t_sel,
                 "cor": cor_sel, "pigmento": row['Pigmento'], "Quant ad (g)": s_ad,
-                "Quantidade OP": coef, "#Plan": n_p, "#Real": n_r, "Litros/Unit": litros_u
+                "Quantidade OP": espec_g, # Salva diretamente em gramas
+                "#Plan": n_p, "#Real": n_r, "Litros/Unit": litros_u
             })
             st.divider()
 
@@ -130,8 +132,7 @@ elif aba == "📈 Controle":
         df_plot = df_hist[(df_hist['tipo de produto'] == p_sel) & (df_hist['cor'] == c_sel)].copy()
         
         if not df_plot.empty:
-            # AJUSTES SOLICITADOS:
-            df_plot['Quantidade OP'] = df_plot['Quantidade OP'] * 1000 # Conversão kg p/ g
+            # Como agora salvamos em gramas, não precisa multiplicar por 1000 aqui novamente
             df_plot['Desvio (g)'] = df_plot['Quant ad (g)'] - df_plot['Quantidade OP']
             df_plot['Var %'] = ((df_plot['Quant ad (g)'] / df_plot['Quantidade OP'].replace(0, np.nan)) - 1) * 100
             
@@ -139,7 +140,7 @@ elif aba == "📈 Controle":
             df_plot['Situação'] = df_plot.apply(lambda r: "⚠️ Fora" if r['Var %'] > 10 else "✅ Ok", axis=1)
             
             st.line_chart(df_plot.pivot_table(index='lote', columns='pigmento', values='Var %'))
-            st.write("**Detalhamento dos Lotes:**")
+            st.write("**Detalhamento dos Lotes (Valores em Gramas):**")
             st.dataframe(df_plot[['data', 'lote', 'pigmento', 'Quantidade OP', 'Quant ad (g)', 'Desvio (g)', 'Var %', 'Situação']], use_container_width=True)
 
 # --- 📜 BANCO DE DADOS ---
@@ -175,16 +176,19 @@ elif aba == "📂 Importar CSV":
         df_imp.columns = [c.strip() for c in df_imp.columns]
         
         if alvo == "historico_producao":
-            # RECALCULO AUTOMÁTICO PELA ABA MESTRA
+            # RECALCULO AUTOMÁTICO PELA ABA MESTRA JÁ TRANSFORMANDO PARA GRAMAS
             df_m_ref = carregar_sql("aba_mestra")
             df_imp = df_imp.drop(columns=['Quantidade OP'], errors='ignore')
             df_imp = pd.merge(df_imp, df_m_ref[['Tipo', 'Cor', 'Pigmento', 'Quant OP (kg)']], 
                               left_on=['tipo de produto', 'cor', 'pigmento'], right_on=['Tipo', 'Cor', 'Pigmento'], how='left')
-            df_imp['Quantidade OP'] = df_imp['Quant OP (kg)'] # Salva o coeficiente kg da mestra
+            
+            # CÁLCULO: (Coef kg/L * 1000) * Unidades Planejadas * Litros por Unidade
+            df_imp['Quantidade OP'] = (df_imp['Quant OP (kg)'] * 1000) * (df_imp['#Plan'] * df_imp['Litros/Unit'])
+            
             df_imp = df_imp.drop(columns=['Tipo', 'Cor', 'Pigmento', 'Quant OP (kg)'], errors='ignore')
 
         salvar_sql(df_imp, alvo, modo='append')
-        st.success("Dados importados com sucesso!"); time.sleep(1); st.rerun()
+        st.success("Dados importados com sucesso! Quantidade OP recalculada em gramas."); time.sleep(1); st.rerun()
 
     st.divider()
     if st.button("🔴 RESET TOTAL DO BANCO"):
