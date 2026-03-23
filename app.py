@@ -33,7 +33,7 @@ def init_db():
                  (Tipo TEXT, Cor TEXT, Pigmento TEXT, [Quant OP (kg)] REAL)''')
     c.execute('''CREATE TABLE IF NOT EXISTS historico_producao 
                  (data TEXT, lote TEXT, tipo_produto TEXT, cor TEXT, pigmento TEXT, 
-                  [Quant ad (g)] REAL, quantidade_op REAL, [#Plan] REAL, [#Real] REAL, [litros_unit] REAL)''')
+                  [quant_ad_g] REAL, [quantidade_op] REAL, [n_plan] REAL, [n_real] REAL, [litros_unit] REAL)''')
     c.execute('''CREATE TABLE IF NOT EXISTS padroes_registrados 
                  (Data TEXT, Produto TEXT, Cor TEXT, Lote TEXT, Status TEXT)''')
     conn.commit()
@@ -45,6 +45,11 @@ def carregar_dados_sql(tabela):
     conn = get_connection()
     df = pd.read_sql(f"SELECT * FROM {tabela}", conn)
     conn.close()
+    # Força conversão numérica ao carregar para o Dashboard não dar erro de 'str'
+    cols_num = ['quant_ad_g', 'quantidade_op', 'n_plan', 'n_real', 'litros_unit']
+    for col in cols_num:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
     return df
 
 def salvar_dados_sql(df, tabela, modo='replace'):
@@ -74,7 +79,7 @@ if aba == "🚀 Registro":
         n_r = v2.number_input("# Unid Real", min_value=1.0, value=1.0)
         sel_v = v3.select_slider("Embalagem:", options=["0,9L", "3,6L", "15L", "18L", "25kg", "Outro"], value="15L")
         litros_u = float(sel_v.replace('L','').replace('kg','').replace(',','.')) if sel_v != "Outro" else v3.number_input("Valor Unit:", value=15.0)
-        check_padrão = v4.checkbox("🌟 Definir como Novo Padrão")
+        check_padrão = v4.checkbox("🌟 Novo Padrão")
 
         formula = df_mestra[(df_mestra['Tipo'] == t_sel) & (df_mestra['Cor'] == cor_sel)]
         st.divider()
@@ -89,24 +94,16 @@ if aba == "🚀 Registro":
                 s_ad = sum([col_p.columns(5)[(t-1)%5].number_input(f"T{t}", min_value=0.0, format="%.2f", key=f"v_{i}_{t}") for t in range(1, int(n_t) + 1)])
                 col_p.info(f"Total: {s_ad:.2f} g")
             
-            regs.append({"data": data_f.strftime("%d/%m/%Y"), "lote": lote_id, "tipo_produto": t_sel, "cor": cor_sel, "pigmento": row['Pigmento'], "Quant ad (g)": s_ad, "quantidade_op": espec_final_g, "#Plan": n_p, "#Real": n_r, "litros_unit": litros_u})
+            regs.append({"data": data_f.strftime("%d/%m/%Y"), "lote": lote_id, "tipo_produto": t_sel, "cor": cor_sel, "pigmento": row['Pigmento'], "quant_ad_g": s_ad, "quantidade_op": espec_final_g, "n_plan": n_p, "n_real": n_r, "litros_unit": litros_u})
             st.divider()
 
         if st.button("💾 SALVAR LOTE"):
             if not lote_id: st.error("Lote obrigatório.")
             else:
                 salvar_dados_sql(pd.DataFrame(regs), "historico_producao", modo='append')
-                if check_padrão:
-                    salvar_dados_sql(pd.DataFrame([{"Data": data_f.strftime("%d/%m/%Y"), "Produto": t_sel, "Cor": cor_sel, "Lote": lote_id, "Status": "Padrão"}]), "padroes_registrados", modo='append')
-                    vol_total = n_r * litros_u
-                    conn = get_connection()
-                    for r in regs:
-                        novo_c = (r['Quant ad (g)'] / 1000) / vol_total if vol_total > 0 else 0
-                        conn.execute("UPDATE aba_mestra SET [Quant OP (kg)] = ? WHERE Tipo = ? AND Cor = ? AND Pigmento = ?", (novo_c, t_sel, cor_sel, r['pigmento']))
-                    conn.commit(); conn.close()
                 st.success("Lote salvo!"); time.sleep(1); st.rerun()
 
-# --- 📈 ABA: CONTROLE (Dashboard CEP) ---
+# --- 📈 ABA: CONTROLE ---
 elif aba == "📈 Controle":
     st.title("📈 Dashboard de Qualidade")
     df_hist = carregar_dados_sql("historico_producao")
@@ -118,7 +115,11 @@ elif aba == "📈 Controle":
         df_plot = df_hist[(df_hist['tipo_produto'] == p_sel) & (df_hist['cor'] == c_sel)].copy()
         
         if not df_plot.empty:
-            df_plot['Var %'] = ((df_plot['Quant ad (g)'] / df_plot['quantidade_op'].replace(0, np.nan)) - 1) * 100
+            # Garante que as colunas são números para evitar o erro 'str' - 'str'
+            df_plot['quant_ad_g'] = pd.to_numeric(df_plot['quant_ad_g'], errors='coerce')
+            df_plot['quantidade_op'] = pd.to_numeric(df_plot['quantidade_op'], errors='coerce')
+            
+            df_plot['Var %'] = ((df_plot['quant_ad_g'] / df_plot['quantidade_op'].replace(0, np.nan)) - 1) * 100
             st.line_chart(df_plot.pivot_table(index='lote', columns='pigmento', values='Var %'))
             st.dataframe(df_plot, use_container_width=True)
 
@@ -138,13 +139,13 @@ elif aba == "📊 Aba Mestra":
     if st.button("💾 Salvar Mestra"):
         salvar_dados_sql(ed_m, "aba_mestra"); st.success("Salvo!")
 
-# --- 📂 ABA: IMPORTAR CSV (CORREÇÃO LINHA 149) ---
+# --- 📂 ABA: IMPORTAR CSV (RECALCULO BLINDADO) ---
 elif aba == "📂 Importar CSV":
     st.title("📂 Importação Inteligente")
-    st.info("💡 A 'Quantidade OP' será recalculada com base nos coeficientes da Aba Mestra atual.")
+    st.info("💡 A 'quantidade_op' será recalculada com base nos coeficientes da Aba Mestra atual.")
     
     up = st.file_uploader("Selecione o arquivo CSV", type="csv")
-    alvo = st.selectbox("Destino", ["aba_mestra", "historico_producao", "padroes_registrados"])
+    alvo = st.selectbox("Destino", ["aba_mestra", "historico_producao"])
     
     if up and st.button("🚀 Confirmar Importação"):
         try:
@@ -153,12 +154,11 @@ elif aba == "📂 Importar CSV":
             except: text = raw.decode('utf-8', errors='ignore')
             
             df_imp = pd.read_csv(io.StringIO(text), sep=None, engine='python')
-            df_imp.columns = [c.strip() for c in df_imp.columns]
+            df_imp.columns = [c.strip().lower() for c in df_imp.columns] # Padroniza para minúsculas
 
             if alvo == "aba_mestra":
                 df_imp = df_imp.iloc[:, :4]
                 df_imp.columns = ['Tipo', 'Cor', 'Pigmento', 'Quant OP (kg)']
-                # Limpeza de números na Mestra
                 df_imp['Quant OP (kg)'] = pd.to_numeric(df_imp['Quant OP (kg)'].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
                 salvar_dados_sql(df_imp, "aba_mestra", modo='append')
                 st.success("Mestra importada!")
@@ -169,47 +169,36 @@ elif aba == "📂 Importar CSV":
                     st.error("⚠️ Importe a Aba Mestra PRIMEIRO.")
                     st.stop()
                 
-                # Mapeamento forçado para as 10 colunas
-                df_imp.columns = ['data', 'lote', 'tipo_produto', 'cor', 'pigmento', 'Quant ad (g)', 'quantidade_op', '#Plan', '#Real', 'litros_unit']
+                # Mapeia colunas baseadas na foto do seu Excel
+                df_imp = df_imp[['data', 'lote', 'tipo_produto', 'cor', 'pigmento', 'quant_ad_g', 'quantidade_op', 'n_plan', 'n_real', 'litros_unit']]
                 
-                # --- LIMPEZA PESADA PARA EVITAR ERRO DE CÁLCULO ---
-                for col in ['Quant ad (g)', 'quantidade_op', '#Plan', '#Real', 'litros_unit']:
-                    # Remove unidades (L, kg, g), troca vírgula por ponto e mantém apenas números
+                # LIMPEZA NUMÉRICA ANTES DO CÁLCULO
+                for col in ['quant_ad_g', 'quantidade_op', 'n_plan', 'n_real', 'litros_unit']:
                     df_imp[col] = df_imp[col].astype(str).str.replace(r'[^\d,.-]', '', regex=True).str.replace(',', '.')
                     df_imp[col] = pd.to_numeric(df_imp[col], errors='coerce').fillna(0.0)
 
-                # Função de recálculo (Antiga Linha 149 protegida)
                 def rec_op(row):
-                    try:
-                        match = df_mestra[(df_mestra['Tipo'] == str(row['tipo_produto'])) & 
-                                        (df_mestra['Cor'] == str(row['cor'])) & 
-                                        (df_mestra['Pigmento'] == str(row['pigmento']))]
-                        if not match.empty:
-                            coef = float(match.iloc[0]['Quant OP (kg)'])
-                            plan = float(row['#Plan'])
-                            litros = float(row['litros_unit'])
-                            # Cálculo seguro com floats
-                            return round((coef * 1000) * (plan * litros), 2)
-                        return float(row['quantidade_op'])
-                    except:
-                        return 0.0
+                    match = df_mestra[(df_mestra['Tipo'] == str(row['tipo_produto'])) & 
+                                    (df_mestra['Cor'] == str(row['cor'])) & 
+                                    (df_mestra['Pigmento'] == str(row['pigmento']))]
+                    if not match.empty:
+                        coef = float(match.iloc[0]['Quant OP (kg)'])
+                        return round((coef * 1000) * (float(row['n_plan']) * float(row['litros_unit'])), 2)
+                    return float(row['quantidade_op'])
 
-                st.write("🔄 Recalculando especificações baseadas na Aba Mestra...")
                 df_imp['quantidade_op'] = df_imp.apply(rec_op, axis=1)
-                
                 salvar_dados_sql(df_imp, "historico_producao", modo='append')
-                st.success("Histórico recalculado e importado com sucesso!")
-
+                st.success("Histórico recalculado e importado!")
+            
             time.sleep(1); st.rerun()
         except Exception as e:
             st.error(f"Erro no processamento: {e}")
 
     st.divider()
     with st.expander("⚠️ Reiniciar Sistema (Reboot)"):
-        confirma = st.text_input("Digite APAGAR para resetar o banco de dados:")
+        confirma = st.text_input("Digite APAGAR para resetar:")
         if st.button("🔴 RESET TOTAL") and confirma == "APAGAR":
             conn = get_connection()
-            for t in ["aba_mestra", "historico_producao", "padroes_registrados"]: 
-                conn.execute(f"DROP TABLE IF EXISTS {t}")
+            for t in ["aba_mestra", "historico_producao", "padroes_registrados"]: conn.execute(f"DROP TABLE IF EXISTS {t}")
             conn.commit(); conn.close()
             init_db(); st.rerun()
