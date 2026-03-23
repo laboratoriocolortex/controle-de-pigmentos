@@ -139,9 +139,9 @@ elif aba == "📈 Controle":
     if st.session_state.df_hist.empty: st.info("Sem dados.")
     else:
         c1, c2 = st.columns(2)
-        p_sel = c1.selectbox("Produto", sorted(st.session_state.df_hist['tipo de produto'].unique()))
-        c_sel = c2.selectbox("Cor", sorted(st.session_state.df_hist[st.session_state.df_hist['tipo de produto'] == p_sel]['cor'].unique()))
-        df_plot = st.session_state.df_hist[(st.session_state.df_hist['tipo de produto'] == p_sel) & (st.session_state.df_hist['cor'] == c_sel)].copy()
+        p_sel = c1.selectbox("Produto", sorted(st.session_state.df_hist['tipo_produto'].unique()))
+        c_sel = c2.selectbox("Cor", sorted(st.session_state.df_hist[st.session_state.df_hist['tipo_produto'] == p_sel]['cor'].unique()))
+        df_plot = st.session_state.df_hist[(st.session_state.df_hist['tipo_produto'] == p_sel) & (st.session_state.df_hist['cor'] == c_sel)].copy()
         
         if not df_plot.empty:
             df_plot['Especificado (g)'] = df_plot['Quantidade OP']
