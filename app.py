@@ -187,11 +187,11 @@ elif aba == "📊 Editor Aba Mestra":
         salvar_dados_sql(ed_m, "aba_mestra")
         st.success("Mestra Atualizada!")
 
-# --- 📂 IMPORTAR/EXPORTAR (COM CONSERTO DO ERRO DE CODEC) ---
+# --- 📂 IMPORTAR/EXPORTAR (VERSÃO ULTRA-RESISTENTE) ---
 elif aba == "📂 Importar/Exportar":
-    st.title("📂 Migração e Exportação Offline")
+    st.title("📂 Migração e Exportação")
     
-    st.subheader("📤 Exportar para Excel/Uso Offline")
+    st.subheader("📤 Exportar")
     tabela_sel = st.selectbox("Selecione os dados:", ["historico_producao", "aba_mestra", "padroes_registrados"])
     df_exp = carregar_dados_sql(tabela_sel)
     if not df_exp.empty:
@@ -200,32 +200,32 @@ elif aba == "📂 Importar/Exportar":
 
     st.divider()
 
-    st.subheader("📥 Importar CSV para o Sistema")
+    st.subheader("📥 Importar CSV")
     up = st.file_uploader("Subir arquivo CSV", type="csv")
-    alvo = st.selectbox("Destino da Importação", ["aba_mestra", "historico_producao", "padroes_registrados"])
+    alvo = st.selectbox("Destino", ["aba_mestra", "historico_producao", "padroes_registrados"])
     
     if up and st.button("🚀 Confirmar Importação"):
         df_imp = None
-        # Tenta ler com 3 encodings para evitar o erro de 'codec can't decode'
-        for enc in ['utf-8-sig', 'latin-1', 'iso-8859-1']:
+        # Lista de tentativas de leitura
+        # 'errors="ignore"' pula caracteres que o Python não reconhece (como o 0xcf da sua foto)
+        for enc in ['utf-8-sig', 'latin-1', 'cp1252']:
             try:
                 up.seek(0)
-                df_imp = pd.read_csv(up, sep=None, engine='python', encoding=enc)
-                break # Se conseguiu ler, para o loop
-            except Exception:
+                df_imp = pd.read_csv(up, sep=None, engine='python', encoding=enc, errors='ignore')
+                if df_imp is not None: break
+            except:
                 continue
         
         if df_imp is not None:
             try:
-                # Se for importar na mestra, garantimos que os nomes das colunas batam com o SQL
+                # Ajuste de colunas caso o CSV antigo tenha nomes levemente diferentes
                 if alvo == "aba_mestra":
                     df_imp.columns = ["Tipo", "Cor", "Pigmento", "Quant_OP_kg"]
                 
                 salvar_dados_sql(df_imp, alvo, modo='append')
-                st.success("Importação concluída com sucesso!")
-                time.sleep(1)
-                st.rerun()
+                st.success("Importação concluída!")
+                time.sleep(1); st.rerun()
             except Exception as e:
                 st.error(f"Erro ao salvar no banco: {e}")
         else:
-            st.error("Não foi possível ler o arquivo. Verifique se ele está aberto no Excel ou se é um CSV válido.")
+            st.error("Erro crítico: O arquivo não pôde ser lido em nenhum formato.")
