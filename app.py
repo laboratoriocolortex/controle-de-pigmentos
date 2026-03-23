@@ -189,43 +189,47 @@ elif aba == "📊 Editor Aba Mestra":
 
 # --- 📂 IMPORTAR/EXPORTAR (VERSÃO ULTRA-RESISTENTE) ---
 elif aba == "📂 Importar/Exportar":
-    st.title("📂 Migração e Exportação")
+    st.title("📂 Migração e Exportação Offline")
     
-    st.subheader("📤 Exportar")
+    # --- SEÇÃO DE EXPORTAÇÃO ---
+    st.subheader("📤 Exportar para Excel/Uso Offline")
     tabela_sel = st.selectbox("Selecione os dados:", ["historico_producao", "aba_mestra", "padroes_registrados"])
     df_exp = carregar_dados_sql(tabela_sel)
     if not df_exp.empty:
+        # Exporta com utf-8-sig para o Excel abrir sem erro de acento depois
         csv = df_exp.to_csv(index=False, sep=';', encoding='utf-8-sig')
         st.download_button(f"📥 Baixar {tabela_sel}.csv", csv, f"{tabela_sel}.csv", "text/csv")
 
     st.divider()
 
-    st.subheader("📥 Importar CSV")
+    # --- SEÇÃO DE IMPORTAÇÃO (AJUSTADA PARA O SEU EXCEL) ---
+    st.subheader("📥 Importar CSV para o Sistema")
     up = st.file_uploader("Subir arquivo CSV", type="csv")
-    alvo = st.selectbox("Destino", ["aba_mestra", "historico_producao", "padroes_registrados"])
+    alvo = st.selectbox("Destino da Importação", ["aba_mestra", "historico_producao", "padroes_registrados"])
     
     if up and st.button("🚀 Confirmar Importação"):
-        df_imp = None
-        # Lista de tentativas de leitura
-        # 'errors="ignore"' pula caracteres que o Python não reconhece (como o 0xcf da sua foto)
-        for enc in ['utf-8-sig', 'latin-1', 'cp1252']:
-            try:
-                up.seek(0)
-                df_imp = pd.read_csv(up, sep=None, engine='python', encoding=enc, errors='ignore')
-                if df_imp is not None: break
-            except:
-                continue
-        
-        if df_imp is not None:
-            try:
-                # Ajuste de colunas caso o CSV antigo tenha nomes levemente diferentes
-                if alvo == "aba_mestra":
+        try:
+            # Forçamos a leitura com o 'latin-1', que é o 'idioma' do Excel no Brasil
+            # O sep=None faz ele detectar automaticamente se você usou vírgula ou ponto e vírgula
+            up.seek(0)
+            df_imp = pd.read_csv(up, sep=None, engine='python', encoding='latin-1')
+            
+            if df_imp is not None:
+                # Se for para o histórico, garantimos que as colunas fiquem exatamente como no banco
+                if alvo == "historico_producao":
+                    # Força os nomes de colunas que vimos na sua foto
+                    df_imp.columns = ['data', 'lote', 'tipo_produto', 'cor', 'pigmento', 
+                                     'quant_ad_g', 'quantidade_op', 'n_plan', 'n_real', 'litros_unit']
+                
+                elif alvo == "aba_mestra":
                     df_imp.columns = ["Tipo", "Cor", "Pigmento", "Quant_OP_kg"]
                 
+                # Salva no banco de dados SQLite
                 salvar_dados_sql(df_imp, alvo, modo='append')
-                st.success("Importação concluída!")
-                time.sleep(1); st.rerun()
-            except Exception as e:
-                st.error(f"Erro ao salvar no banco: {e}")
-        else:
-            st.error("Erro crítico: O arquivo não pôde ser lido em nenhum formato.")
+                st.success("Importação concluída com sucesso!")
+                time.sleep(1)
+                st.rerun()
+                
+        except Exception as e:
+            # Se ainda assim der erro, ele vai te mostrar o motivo técnico real (ex: falta de coluna)
+            st.error(f"Erro ao processar arquivo: {e}")
