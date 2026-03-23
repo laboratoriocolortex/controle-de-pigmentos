@@ -138,6 +138,7 @@ if aba == "🚀 Registro":
                 st.success("Lote registrado!"); st.balloons(); time.sleep(1); st.rerun()
 
 # --- 📈 ABA: CONTROLE ---
+# --- 📈 ABA: CONTROLE ---
 elif aba == "📈 Controle":
     st.title("📈 Dashboard de Qualidade (CEP)")
     df_hist = carregar_sql("historico_producao")
@@ -149,49 +150,50 @@ elif aba == "📈 Controle":
         p_sel = c1.selectbox("Produto", sorted(df_hist['tipo de produto'].unique()))
         c_sel = c2.selectbox("Cor", sorted(df_hist[df_hist['tipo de produto'] == p_sel]['cor'].unique()))
         
-        # Filtra os dados conforme seleção
         df_plot = df_hist[(df_hist['tipo de produto'] == p_sel) & (df_hist['cor'] == c_sel)].copy()
         
         if not df_plot.empty:
-            # 1. Ajuste: Transformar Quantidade OP de kg para g (se o valor for da especificação original)
-            # Nota: No seu banco, se 'Quantidade OP' já estiver calculada para o lote (em gramas), 
-            # não multiplique. Mas seguindo sua solicitação de conversão:
-            # df_plot['Quantidade OP'] = df_plot['Quantidade OP'] * 1000 # Ative se o banco salvar em KG
+            # 1. Ajuste: Transformar Quantidade OP de kg para g (multiplicando por 1000)
+            # Isso garante que 0.480 vire 480
+            df_plot['Quantidade OP'] = df_plot['Quantidade OP'] * 1000
             
-            # 2. Variação Absoluta (em gramas)
+            # 2. Variação Absoluta: Quant ad (g) - Quantidade OP (g)
+            # Se Quant ad foi 250 e OP era 480, o desvio será -230g
             df_plot['Desvio (g)'] = df_plot['Quant ad (g)'] - df_plot['Quantidade OP']
             
-            # 3. Cálculo da porcentagem para a regra de negócio
+            # 3. Cálculo da porcentagem (Var %)
             df_plot['Var %'] = ((df_plot['Quant ad (g)'] / df_plot['Quantidade OP'].replace(0, np.nan)) - 1) * 100
             
-            # 4. Situação: "Fora" se desvio > 10% (absoluto)
+            # 4. Situação: "Fora" apenas se ultrapassar 10% da OP
             df_plot['Situação'] = df_plot.apply(
                 lambda r: "⚠️ Fora" if abs(r['Var %']) > 10 else "✅ Ok", axis=1
             )
             
-            # Gráfico de Tendência (Variabilidade %)
+            # Gráfico de Tendência
             st.subheader(f"Tendência de Pigmentação: {p_sel} ({c_sel})")
             chart_data = df_plot.pivot_table(index='lote', columns='pigmento', values='Var %')
             st.line_chart(chart_data)
             
-            # Tabela de Dados com as novas colunas
+            # Tabela de Detalhamento com a ordem correta das colunas
             st.write("**Detalhamento dos Lotes:**")
             colunas_exibir = [
                 'data', 'lote', 'pigmento', 'Quantidade OP', 
                 'Quant ad (g)', 'Desvio (g)', 'Var %', 'Situação'
             ]
             
-            # Formatação visual da tabela
+            # Exibição com formatação de cores
             st.dataframe(
-                df_plot[colunas_exibir].style.applymap(
-                    lambda x: 'color: red' if x == "⚠️ Fora" else ('color: green' if x == "✅ Ok" else ''),
+                df_plot[colunas_exibir].style.format({
+                    'Quantidade OP': '{:.2f}',
+                    'Quant ad (g)': '{:.2f}',
+                    'Desvio (g)': '{:.2f}',
+                    'Var %': '{:.2f}%'
+                }).applymap(
+                    lambda x: 'color: red; font-weight: bold' if x == "⚠️ Fora" else ('color: green' if x == "✅ Ok" else ''),
                     subset=['Situação']
                 ), 
                 use_container_width=True
             )
-        else:
-            st.warning("Nenhum dado encontrado para essa combinação de Produto e Cor.")
-
 # --- 📜 BANCO DE DADOS ---
 elif aba == "📜 Banco de Dados":
     st.title("📜 Gestão de Dados (SQLite)")
