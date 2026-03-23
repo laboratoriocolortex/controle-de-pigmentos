@@ -217,18 +217,28 @@ elif aba == "📂 Importar/Exportar":
 
     st.divider()
 
-    # IMPORTAÇÃO
+    # IMPORTAÇÃO (CORRIGIDA PARA ERROS DE CODEC)
     st.subheader("📥 Importar CSV para o Sistema")
     up = st.file_uploader("Subir arquivo CSV", type="csv")
     alvo = st.selectbox("Destino da Importação", ["aba_mestra", "historico_producao", "padroes_registrados"])
+    
     if up and st.button("🚀 Confirmar Importação"):
         try:
-            df_imp = pd.read_csv(up, sep=None, engine='python', encoding='utf-8-sig')
-            # Garante que os nomes das colunas batam com o SQL (case sensitive)
+            # Tenta ler primeiro com UTF-8, se falhar, tenta Latin-1 (padrão Excel Brasil)
+            try:
+                df_imp = pd.read_csv(up, sep=None, engine='python', encoding='utf-8-sig')
+            except UnicodeDecodeError:
+                up.seek(0) # Volta o arquivo para o início para tentar de novo
+                df_imp = pd.read_csv(up, sep=None, engine='python', encoding='latin-1')
+            
+            # Padronização de colunas para o banco de dados
             if alvo == "aba_mestra":
+                # Força os nomes corretos para não dar erro no SQL
                 df_imp.columns = ["Tipo", "Cor", "Pigmento", "Quant_OP_kg"]
+            
             salvar_dados_sql(df_imp, alvo, modo='append')
-            st.success("Importação concluída!")
-            time.sleep(1); st.rerun()
+            st.success("Importação concluída com sucesso!")
+            time.sleep(1)
+            st.rerun()
         except Exception as e:
             st.error(f"Erro ao processar arquivo: {e}")
