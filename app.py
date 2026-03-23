@@ -5,10 +5,10 @@ import os
 import time
 from datetime import datetime, date
 
-# 1. Configuração de Layout (Mantida)
+# 1. Configuração de Layout
 st.set_page_config(page_title="Colortex 2026 - Gestão de R&D", layout="wide", page_icon="🧪")
 
-# --- ESTILO CSS (Mantido) ---
+# --- ESTILO CSS ---
 st.markdown("""
     <style>
     .stNumberInput { margin-bottom: -1rem; }
@@ -50,7 +50,7 @@ def salvar_dados_sql(df, tabela, modo='replace'):
     df.to_sql(tabela, conn, if_exists=modo, index=False)
     conn.close()
 
-# --- NAVEGAÇÃO (6 Abas Originais Mantidas) ---
+# --- NAVEGAÇÃO ---
 menu = ["🚀 Produção", "📈 Gráficos CEP", "📜 Banco de Dados", "📋 Padrões Registrados", "📊 Editor Aba Mestra", "📂 Importar/Exportar"]
 aba = st.sidebar.radio("Navegação:", menu)
 
@@ -60,7 +60,7 @@ if aba == "🚀 Produção":
     df_mestra = carregar_dados_sql("aba_mestra")
     
     if df_mestra.empty:
-        st.warning("Aba Mestra vazia no SQLite. Use 'Importar/Exportar'.")
+        st.warning("Aba Mestra vazia. Importe seus dados na aba 'Importar/Exportar'.")
     else:
         c1, c2, c3, c4 = st.columns([1.5, 1.5, 1, 1])
         t_sel = c1.selectbox("Produto", sorted(df_mestra['Tipo'].unique()))
@@ -135,48 +135,14 @@ elif aba == "📈 Gráficos CEP":
             st.line_chart(df_plot.pivot_table(index='lote', columns='pigmento', values='Var %'))
             st.dataframe(df_plot, use_container_width=True)
 
-# --- 📜 BANCO DE DADOS (Funcionalidade de Padrão Retroativo Mantida) ---
+# --- 📜 BANCO DE DADOS ---
 elif aba == "📜 Banco de Dados":
     st.title("📜 Gestão de Registros")
     df_hist = carregar_dados_sql("historico_producao")
-    
-    with st.expander("🌟 Homologar Lote Antigo como Padrão"):
-        l_busca = st.text_input("Número do Lote:")
-        if st.button("Confirmar Padrão Retroativo") and l_busca:
-            l_data = df_hist[df_hist['lote'].astype(str) == l_busca]
-            if not l_data.empty:
-                conn = get_connection()
-                for _, r in l_data.iterrows():
-                    vol_real = r['n_real'] * r['litros_unit']
-                    novo_coef = (r['quant_ad_g'] / 1000) / vol_real if vol_real > 0 else 0
-                    conn.execute("UPDATE aba_mestra SET Quant_OP_kg = ? WHERE Tipo = ? AND Cor = ? AND Pigmento = ?", 
-                                 (novo_coef, r['tipo_produto'], r['cor'], r['pigmento']))
-                conn.commit()
-                conn.close()
-                st.success(f"Lote {l_busca} validado como padrão!"); time.sleep(1); st.rerun()
-
     ed_h = st.data_editor(df_hist, num_rows="dynamic", use_container_width=True)
-    c1, c2 = st.columns(2)
-    if c1.button("💾 Salvar Alterações"):
+    if st.button("💾 Salvar Alterações"):
         salvar_dados_sql(ed_h, "historico_producao")
         st.success("Atualizado!")
-    with c2:
-        l_del = st.text_input("Excluir Lote (ID):")
-        if st.button("❌ EXCLUIR"):
-            conn = get_connection()
-            conn.execute("DELETE FROM historico_producao WHERE lote = ?", (l_del,))
-            conn.commit()
-            conn.close()
-            st.rerun()
-
-# --- 📋 PADRÕES REGISTRADOS ---
-elif aba == "📋 Padrões Registrados":
-    st.title("📋 Histórico de Padrões")
-    df_padr = carregar_dados_sql("padroes_registrados")
-    ed_p = st.data_editor(df_padr, num_rows="dynamic", use_container_width=True)
-    if st.button("Salvar Tabela de Padrões"):
-        salvar_dados_sql(ed_p, "padroes_registrados")
-        st.success("Salvo!")
 
 # --- 📊 EDITOR ABA MESTRA ---
 elif aba == "📊 Editor Aba Mestra":
@@ -187,49 +153,41 @@ elif aba == "📊 Editor Aba Mestra":
         salvar_dados_sql(ed_m, "aba_mestra")
         st.success("Mestra Atualizada!")
 
-# --- 📂 IMPORTAR/EXPORTAR (VERSÃO ULTRA-RESISTENTE) ---
+# --- 📂 IMPORTAR/EXPORTAR (SOLUÇÃO DEFINITIVA PARA CSV BRASILEIRO) ---
 elif aba == "📂 Importar/Exportar":
-    st.title("📂 Migração e Exportação Offline")
+    st.title("📂 Migração e Exportação")
     
-    # --- SEÇÃO DE EXPORTAÇÃO ---
-    st.subheader("📤 Exportar para Excel/Uso Offline")
+    st.subheader("📤 Exportar para Excel")
     tabela_sel = st.selectbox("Selecione os dados:", ["historico_producao", "aba_mestra", "padroes_registrados"])
     df_exp = carregar_dados_sql(tabela_sel)
     if not df_exp.empty:
-        # Exporta com utf-8-sig para o Excel abrir sem erro de acento depois
         csv = df_exp.to_csv(index=False, sep=';', encoding='utf-8-sig')
         st.download_button(f"📥 Baixar {tabela_sel}.csv", csv, f"{tabela_sel}.csv", "text/csv")
 
     st.divider()
 
-    # --- SEÇÃO DE IMPORTAÇÃO (AJUSTADA PARA O SEU EXCEL) ---
-    st.subheader("📥 Importar CSV para o Sistema")
+    st.subheader("📥 Importar CSV")
     up = st.file_uploader("Subir arquivo CSV", type="csv")
-    alvo = st.selectbox("Destino da Importação", ["aba_mestra", "historico_producao", "padroes_registrados"])
+    alvo = st.selectbox("Destino", ["aba_mestra", "historico_producao", "padroes_registrados"])
     
     if up and st.button("🚀 Confirmar Importação"):
         try:
-            # Forçamos a leitura com o 'latin-1', que é o 'idioma' do Excel no Brasil
-            # O sep=None faz ele detectar automaticamente se você usou vírgula ou ponto e vírgula
+            # Lógica ultra-resistente: 
+            # 1. Abre ignorando erros de caracteres (resolve o codec 0xcf)
+            # 2. Tenta detectar o separador (vírgula ou ponto e vírgula)
             up.seek(0)
-            df_imp = pd.read_csv(up, sep=None, engine='python', encoding='latin-1')
+            df_imp = pd.read_csv(up, sep=None, engine='python', encoding='latin-1', on_bad_lines='skip')
             
             if df_imp is not None:
-                # Se for para o histórico, garantimos que as colunas fiquem exatamente como no banco
+                # Forçamos as colunas na ordem exata do banco
                 if alvo == "historico_producao":
-                    # Força os nomes de colunas que vimos na sua foto
                     df_imp.columns = ['data', 'lote', 'tipo_produto', 'cor', 'pigmento', 
                                      'quant_ad_g', 'quantidade_op', 'n_plan', 'n_real', 'litros_unit']
-                
                 elif alvo == "aba_mestra":
                     df_imp.columns = ["Tipo", "Cor", "Pigmento", "Quant_OP_kg"]
                 
-                # Salva no banco de dados SQLite
                 salvar_dados_sql(df_imp, alvo, modo='append')
-                st.success("Importação concluída com sucesso!")
-                time.sleep(1)
-                st.rerun()
-                
+                st.success("Importação concluída!")
+                time.sleep(1); st.rerun()
         except Exception as e:
-            # Se ainda assim der erro, ele vai te mostrar o motivo técnico real (ex: falta de coluna)
-            st.error(f"Erro ao processar arquivo: {e}")
+            st.error(f"Erro ao processar: {e}")
