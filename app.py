@@ -31,8 +31,8 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS aba_mestra 
                  (Tipo TEXT, Cor TEXT, Pigmento TEXT, [Quant OP (kg)] REAL)''')
     c.execute('''CREATE TABLE IF NOT EXISTS historico_producao 
-                 (data TEXT, lote TEXT, [tipo de produto] TEXT, cor TEXT, pigmento TEXT, 
-                  [Quant ad (g)] REAL, [Quantidade OP] REAL, [#Plan] REAL, [#Real] REAL, [Litros/Unit] REAL)''')
+                 (data TEXT, lote TEXT, tipo_produto TEXT, cor TEXT, pigmento TEXT, 
+                  [Quant ad (g)] REAL, quantidade_op REAL, [#Plan] REAL, [#Real] REAL, [litros_unit] REAL)''')
     c.execute('''CREATE TABLE IF NOT EXISTS padroes_registrados 
                  (Data TEXT, Produto TEXT, Cor TEXT, Lote TEXT, Status TEXT)''')
     conn.commit()
@@ -55,12 +55,12 @@ def salvar_dados_sql(df, tabela, modo='replace'):
 menu = ["🚀 Registro", "📈 Controle", "📜 Banco de Dados", "📋 Padrões", "📊 Aba Mestra", "📂 Importar CSV"]
 aba = st.sidebar.radio("Navegação:", menu)
 
-# --- 🚀 ABA: PRODUÇÃO (Mantida) ---
+# --- 🚀 ABA: PRODUÇÃO ---
 if aba == "🚀 Registro":
     st.title("🚀 Registro de Pigmentação")
     df_mestra = carregar_dados_sql("aba_mestra")
     if df_mestra.empty:
-        st.warning("Aba Mestra vazia.")
+        st.warning("Aba Mestra vazia. Importe os dados primeiro.")
     else:
         c1, c2, c3, c4 = st.columns([1.5, 1.5, 1, 1])
         t_sel = c1.selectbox("Produto", sorted(df_mestra['Tipo'].unique()))
@@ -69,8 +69,8 @@ if aba == "🚀 Registro":
         data_f = c4.date_input("Data", date.today())
 
         v1, v2, v3, v4 = st.columns([1, 1, 2, 1.5])
-        n_p = v1.number_input("# Unid Plan", min_value=1, value=1)
-        n_r = v2.number_input("# Unid Real", min_value=1, value=1)
+        n_p = v1.number_input("# Unid Plan", min_value=1.0, value=1.0)
+        n_r = v2.number_input("# Unid Real", min_value=1.0, value=1.0)
         sel_v = v3.select_slider("Embalagem:", options=["0,9L", "3,6L", "15L", "18L", "25kg", "Outro"], value="15L")
         litros_u = float(sel_v.replace('L','').replace('kg','').replace(',','.')) if sel_v != "Outro" else v3.number_input("Valor Unit:", value=15.0)
         check_padrão = v4.checkbox("🌟 Definir como Novo Padrão")
@@ -80,18 +80,15 @@ if aba == "🚀 Registro":
 
         regs = []
         for i, row in formula.iterrows():
-            pigm = row['Pigmento']
-            coef_kg_l = float(row['Quant OP (kg)'])
-            espec_final_g = round((coef_kg_l * 1000) * (n_p * litros_u), 2)
-            
+            espec_final_g = round((float(row['Quant OP (kg)']) * 1000) * (n_p * litros_u), 2)
             with st.container():
                 col_i, col_p = st.columns([1.5, 3.5])
-                col_i.subheader(pigm); col_i.write(f"Espec: {espec_final_g}g")
+                col_i.subheader(row['Pigmento']); col_i.write(f"Espec: {espec_final_g}g")
                 n_t = col_i.number_input(f"Toques", min_value=1, value=1, key=f"nt_{i}")
                 s_ad = sum([col_p.columns(5)[(t-1)%5].number_input(f"T{t}", min_value=0.0, format="%.2f", key=f"v_{i}_{t}") for t in range(1, int(n_t) + 1)])
                 col_p.info(f"Total: {s_ad:.2f} g")
             
-            regs.append({"data": data_f.strftime("%d/%m/%Y"), "lote": lote_id, "tipo de produto": t_sel, "cor": cor_sel, "pigmento": pigm, "Quant ad (g)": s_ad, "Quantidade OP": espec_final_g, "#Plan": n_p, "#Real": n_r, "Litros/Unit": litros_u})
+            regs.append({"data": data_f.strftime("%d/%m/%Y"), "lote": lote_id, "tipo_produto": t_sel, "cor": cor_sel, "pigmento": row['Pigmento'], "Quant ad (g)": s_ad, "quantidade_op": espec_final_g, "#Plan": n_p, "#Real": n_r, "litros_unit": litros_u})
             st.divider()
 
         if st.button("💾 SALVAR LOTE"):
@@ -100,30 +97,32 @@ if aba == "🚀 Registro":
                 salvar_dados_sql(pd.DataFrame(regs), "historico_producao", modo='append')
                 if check_padrão:
                     salvar_dados_sql(pd.DataFrame([{"Data": data_f.strftime("%d/%m/%Y"), "Produto": t_sel, "Cor": cor_sel, "Lote": lote_id, "Status": "Padrão"}]), "padroes_registrados", modo='append')
-                    vol_real_total = n_r * litros_u
+                    vol_total = n_r * litros_u
                     conn = get_connection()
                     for r in regs:
-                        novo_coef = (r['Quant ad (g)'] / 1000) / vol_real_total if vol_real_total > 0 else 0
-                        conn.execute("UPDATE aba_mestra SET [Quant OP (kg)] = ? WHERE Tipo = ? AND Cor = ? AND Pigmento = ?", (novo_coef, t_sel, cor_sel, r['pigmento']))
+                        novo_c = (r['Quant ad (g)'] / 1000) / vol_total if vol_total > 0 else 0
+                        conn.execute("UPDATE aba_mestra SET [Quant OP (kg)] = ? WHERE Tipo = ? AND Cor = ? AND Pigmento = ?", (novo_c, t_sel, cor_sel, r['pigmento']))
                     conn.commit(); conn.close()
                 st.success("Lote salvo!"); time.sleep(1); st.rerun()
 
-# --- 📈 ABA: CONTROLE ---
+# --- 📈 ABA: CONTROLE (Dashboard CEP) ---
 elif aba == "📈 Controle":
     st.title("📈 Dashboard de Qualidade")
     df_hist = carregar_dados_sql("historico_producao")
     if df_hist.empty: st.info("Sem dados registrados.")
     else:
         c1, c2 = st.columns(2)
-        p_sel = c1.selectbox("Produto", sorted(df_hist['tipo de produto'].unique()))
-        c_sel = c2.selectbox("# Cor", sorted(df_hist[df_hist['tipo de produto'] == p_sel]['cor'].unique()))
-        df_plot = df_hist[(df_hist['tipo de produto'] == p_sel) & (df_hist['cor'] == c_sel)].copy()
+        p_sel = c1.selectbox("Produto", sorted(df_hist['tipo_produto'].unique()))
+        c_sel = c2.selectbox("Cor", sorted(df_hist[df_hist['tipo_produto'] == p_sel]['cor'].unique()))
+        df_plot = df_hist[(df_hist['tipo_produto'] == p_sel) & (df_hist['cor'] == c_sel)].copy()
+        
         if not df_plot.empty:
-            df_plot['Var %'] = ((df_plot['Quant ad (g)'] / df_plot['Quantidade OP'].replace(0, 1)) - 1) * 100
+            # Cálculo de variância usando NumPy (np.nan) para evitar erro de divisão por zero
+            df_plot['Var %'] = ((df_plot['Quant ad (g)'] / df_plot['quantidade_op'].replace(0, np.nan)) - 1) * 100
             st.line_chart(df_plot.pivot_table(index='lote', columns='pigmento', values='Var %'))
             st.dataframe(df_plot, use_container_width=True)
 
-# --- 📜 BANCO DE DADOS (Mantido) ---
+# --- 📜 BANCO DE DADOS ---
 elif aba == "📜 Banco de Dados":
     st.title("📜 Gestão de Dados")
     df_hist = carregar_dados_sql("historico_producao")
@@ -131,77 +130,70 @@ elif aba == "📜 Banco de Dados":
     if st.button("💾 Salvar Alterações"):
         salvar_dados_sql(ed_h, "historico_producao"); st.success("Atualizado!")
 
-# --- 📋 PADRÕES / 📊 ABA MESTRA (Mantidos) ---
-elif aba == "📋 Padrões":
-    st.title("📋 Histórico de Padrões")
-    df_padr = carregar_dados_sql("padroes_registrados")
-    ed_p = st.data_editor(df_padr, num_rows="dynamic", use_container_width=True)
-    if st.button("Salvar Padrões"):
-        salvar_dados_sql(ed_p, "padroes_registrados"); st.success("Salvo!")
-
+# --- 📊 ABA MESTRA / 📋 PADRÕES ---
 elif aba == "📊 Aba Mestra":
     st.title("📊 Editor Aba Mestra (kg/L)")
-    df_mestra = carregar_dados_sql("aba_mestra")
-    ed_m = st.data_editor(df_mestra, num_rows="dynamic", use_container_width=True)
+    df_m = carregar_dados_sql("aba_mestra")
+    ed_m = st.data_editor(df_m, num_rows="dynamic", use_container_width=True)
     if st.button("💾 Salvar Mestra"):
-        salvar_dados_sql(ed_m, "aba_mestra"); st.success("Mestra Atualizada!")
+        salvar_dados_sql(ed_m, "aba_mestra"); st.success("Salvo!")
 
-# --- 📂 ABA: IMPORTAR CSV (LÓGICA RECALCULAR COM MESTRA + LEITURA BINÁRIA) ---
+elif aba == "📋 Padrões":
+    st.title("📋 Histórico de Padrões")
+    df_p = carregar_dados_sql("padroes_registrados")
+    st.dataframe(df_p, use_container_width=True)
+
+# --- 📂 ABA: IMPORTAR CSV (CORRIGIDA) ---
 elif aba == "📂 Importar CSV":
-    st.title("📂 Importação com Recálculo")
+    st.title("📂 Importação Inteligente")
+    st.info("O histórico será recalculado com base nos coeficientes da Aba Mestra atual.")
     
-    st.info("💡 Lógica de Importação: Ao subir o histórico, a 'Quantidade OP' será recalculada automaticamente com base nos coeficientes atuais da Aba Mestra.")
-    
-    up = st.file_uploader("Subir CSV", type="csv")
+    up = st.file_uploader("Selecione o arquivo CSV", type="csv")
     alvo = st.selectbox("Destino", ["aba_mestra", "historico_producao", "padroes_registrados"])
     
     if up and st.button("🚀 Confirmar Importação"):
         try:
-            # 1. Leitura Binária à prova de erros de codec (0xcf, etc)
+            # Leitura binária para ignorar erros de codec do Excel
             raw = up.read()
             try: text = raw.decode('latin-1')
             except: text = raw.decode('utf-8', errors='ignore')
+            
             df_imp = pd.read_csv(io.StringIO(text), sep=None, engine='python')
             df_imp.columns = [c.strip() for c in df_imp.columns]
 
-            # 2. Lógica Específica para Aba Mestra
             if alvo == "aba_mestra":
                 df_imp = df_imp.iloc[:, :4]
                 df_imp.columns = ['Tipo', 'Cor', 'Pigmento', 'Quant OP (kg)']
                 salvar_dados_sql(df_imp, "aba_mestra", modo='append')
-                st.success("Aba Mestra atualizada!")
+                st.success("Mestra importada!")
 
-            # 3. Lógica Específica para Histórico (COM RECALCULO)
             elif alvo == "historico_producao":
                 df_mestra = carregar_dados_sql("aba_mestra")
                 if df_mestra.empty:
-                    st.error("⚠️ Importe a Aba Mestra PRIMEIRO para poder recalcular o histórico.")
+                    st.error("Importe a Aba Mestra primeiro.")
                     st.stop()
                 
-                # Garante colunas padrão
-                df_imp.columns = ['data', 'lote', 'tipo de produto', 'cor', 'pigmento', 'Quant ad (g)', 'Quantidade OP', '#Plan', '#Real', 'Litros/Unit']
+                # Mapeamento forçado para bater com o banco
+                df_imp.columns = ['data', 'lote', 'tipo_produto', 'cor', 'pigmento', 'Quant ad (g)', 'quantidade_op', '#Plan', '#Real', 'litros_unit']
                 
-                # Recálculo: Procura o coeficiente na mestra e multiplica pelo volume planejado do CSV
-                def recalcular(row):
-                    coef = df_mestra[(df_mestra['Tipo'] == row['tipo de produto']) & 
-                                    (df_mestra['Cor'] == row['cor']) & 
-                                    (df_mestra['Pigmento'] == row['pigmento'])]['Quant OP (kg)']
-                    if not coef.empty:
-                        return round((float(coef.iloc[0]) * 1000) * (float(row['#Plan']) * float(row['Litros/Unit'])), 2)
-                    return row['Quantidade OP'] # Mantém original se não achar na mestra
+                def rec_op(row):
+                    match = df_mestra[(df_mestra['Tipo'] == row['tipo_produto']) & (df_mestra['Cor'] == row['cor']) & (df_mestra['Pigmento'] == row['pigmento'])]
+                    if not match.empty:
+                        return round((float(match.iloc[0]['Quant OP (kg)']) * 1000) * (float(row['#Plan']) * float(row['litros_unit'])), 2)
+                    return row['quantidade_op']
 
-                st.write("🔄 Recalculando especificações baseadas na Aba Mestra...")
-                df_imp['Quantidade OP'] = df_imp.apply(recalcular, axis=1)
-                
+                df_imp['quantidade_op'] = df_imp.apply(rec_op, axis=1)
                 salvar_dados_sql(df_imp, "historico_producao", modo='append')
-                st.success("Histórico recalculado e importado com sucesso!")
+                st.success("Histórico recalculado e importado!")
 
             time.sleep(1); st.rerun()
         except Exception as e:
             st.error(f"Erro: {e}")
 
     st.divider()
-    with st.expander("⚠️ Reiniciar Sistema (Reboot)"):
-        if st.button("🔴 APAGAR TUDO") and st.text_input("Confirme com 'APAGAR'") == "APAGAR":
-            conn = get_connection(); conn.execute("DROP TABLE IF EXISTS aba_mestra"); conn.execute("DROP TABLE IF EXISTS historico_producao"); conn.execute("DROP TABLE IF EXISTS padroes_registrados"); conn.commit(); conn.close()
+    if st.button("🔴 RESET TOTAL DO SISTEMA (CUIDADO)"):
+        if st.text_input("Digite APAGAR para confirmar") == "APAGAR":
+            conn = get_connection()
+            for t in ["aba_mestra", "historico_producao", "padroes_registrados"]: conn.execute(f"DROP TABLE IF EXISTS {t}")
+            conn.commit(); conn.close()
             init_db(); st.rerun()
