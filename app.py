@@ -86,29 +86,39 @@ if aba == "🚀 Registro":
             salvar_dados_sql(pd.DataFrame(regs), "historico_producao", modo='append')
             st.success("Gravado com sucesso!"); time.sleep(1); st.rerun()
 
-# --- 📈 ABA: CONTROLE (CEP) - PUXA DIRETO DO BANCO ---
+# --- 📈 ABA: CONTROLE (CEP) ---
 elif aba == "📈 Controle (CEP)":
     st.title("📈 Gráfico CEP (Fonte: Banco de Dados)")
-    # O gráfico agora ignora o CSV e lê o Banco que você editou
     df_cep = carregar_dados_sql("historico_producao")
     
     if df_cep.empty:
         st.info("O Banco de Dados está vazio.")
     else:
+        # Padronização forçada dos nomes das colunas para evitar KeyError
+        df_cep.columns = ['data', 'lote', 'tipo_produto', 'cor', 'pigmento', 
+                          'quant_ad_g', 'quantidade_op', 'n_plan', 'n_real', 'litros_unit']
+        
         prod = st.selectbox("Escolha o Produto para Análise", sorted(df_cep['tipo_produto'].unique()))
-        # Filtra apenas o que está no banco
         df_view = df_cep[df_cep['tipo_produto'] == prod].copy()
         
-        # Cálculo de Variância % baseado nas colunas espelhadas
-        df_view['Var %'] = ((df_view['quant_ad_g'] / df_view['quantidade_op'].replace(0, np.nan)) - 1) * 100
+        # CONVERSÃO FORÇADA PARA NÚMERO (Resolve o erro str - str)
+        # Remove qualquer coisa que não seja número, ponto ou vírgula e converte para float
+        for col in ['quant_ad_g', 'quantidade_op']:
+            df_view[col] = pd.to_numeric(
+                df_view[col].astype(str).str.replace(',', '.').str.replace(r'[^\d.-]', '', regex=True), 
+                errors='coerce'
+            ).fillna(0.0)
         
-        st.subheader(f"Variabilidade por Lote - {prod}")
-        # Pivot para o gráfico reconhecer os pigmentos como linhas diferentes
-        chart_data = df_view.pivot_table(index='lote', columns='pigmento', values='Var %')
-        st.line_chart(chart_data)
-        
-        st.write("**Visualização do Banco de Dados Filtrado:**")
-        st.dataframe(df_view, use_container_width=True)
+        if not df_view.empty:
+            # Cálculo de Variância % seguro (usando np.nan para evitar divisão por zero)
+            df_view['Var %'] = ((df_view['quant_ad_g'] / df_view['quantidade_op'].replace(0, np.nan)) - 1) * 100
+            
+            st.subheader(f"Variabilidade por Lote - {prod}")
+            chart_data = df_view.pivot_table(index='lote', columns='pigmento', values='Var %')
+            st.line_chart(chart_data)
+            
+            st.write("**Visualização do Banco de Dados Filtrado:**")
+            st.dataframe(df_view, use_container_width=True)
 
 # --- 📜 ABA: BANCO DE DADOS (EDITOR) ---
 elif aba == "📜 Banco de Dados":
