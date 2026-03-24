@@ -44,9 +44,17 @@ def carregar_sql(tabela):
 
 def salvar_sql(df, tabela, modo='replace'):
     conn = get_connection()
-    cols_ignore = ['Desvio (g)', 'Var %', 'Situação', 'Especificado (g)']
-    df_save = df.drop(columns=[c for c in cols_ignore if c in df.columns], errors='ignore')
+    # Mapeamento de colunas para garantir integridade do banco
+    cols_db = {
+        "aba_mestra": ['Tipo', 'Cor', 'Pigmento', 'Quant OP (kg)'],
+        "historico_producao": ['data', 'lote', 'tipo de produto', 'cor', 'pigmento', 'Quant ad (g)', 'Quantidade OP', '#Plan', '#Real', 'Litros/Unit'],
+        "padroes_registrados": ['Data', 'Produto', 'Cor', 'Lote', 'Status']
+    }
+    colunas_validas = cols_db.get(tabela, df.columns)
+    df_save = df[[c for c in colunas_validas if c in df.columns]].copy()
+    
     df_save.to_sql(tabela, conn, if_exists=modo, index=False)
+    conn.commit()
     conn.close()
 
 # --- ESTILO CSS ---
@@ -80,7 +88,7 @@ if aba == "🚀 Registro":
         n_p = v1.number_input("# Unid Plan", min_value=0.1, value=1.0)
         n_r = v2.number_input("# Unid Real", min_value=0.1, value=1.0)
         
-        # OPÇÕES DE EMBALAGEM ATUALIZADAS
+        # Slider com as 12 opções solicitadas
         opcoes_emb = ["0,9L", "1,5kg", "3L", "3,6L", "5kg", "14L", "15L", "18kg", "20kg", "22kg", "25kg", "Outro"]
         sel_v = v3.select_slider("Embalagem:", options=opcoes_emb, value="15L")
         
@@ -97,7 +105,7 @@ if aba == "🚀 Registro":
         regs = []
         for i, row in formula.iterrows():
             coef = float(row['Quant OP (kg)'])
-            # Cálculo da OP em gramas (Coef * 1000 * Volume Planejado)
+            # OP calculada em gramas para o banco
             espec_g = round((coef * 1000) * (n_p * litros_u), 2)
             
             with st.container():
@@ -121,11 +129,38 @@ if aba == "🚀 Registro":
         if st.button("💾 SALVAR LOTE"):
             if not lote_id: st.error("Lote obrigatório.")
             else:
-                salvar_sql(pd.DataFrame(regs), "historico_producao", modo='append')
+                df_atual = pd.DataFrame(regs)
+                salvar_sql(df_atual, "historico_producao", modo='append')
+                
                 if check_padrao:
+                    # Salva o registro do padrão
                     df_p = pd.DataFrame([{"Data": data_f.strftime("%d/%m/%Y"), "Produto": t_sel, "Cor": cor_sel, "Lote": lote_id, "Status": "Padrão"}])
                     salvar_sql(df_p, "padroes_registrados", modo='append')
+                    
+                    # Atualiza Aba Mestra (Retroalimentação g -> kg/L)
+                    conn = get_connection()
+                    for r in regs:
+                        novo_coef_kg = (r['Quant ad (g)'] / 1000) / (n_r * litros_u)
+                        conn.execute("UPDATE aba_mestra SET [Quant OP (kg)] = ? WHERE Tipo = ? AND Cor = ? AND Pigmento = ?",
+                                     (novo_coef_kg, t_sel, cor_sel, r['pigmento']))
+                    conn.commit()
+                    conn.close()
+                    st.warning("⚠️ Aba Mestra atualizada com o novo padrão!")
+
                 st.success("Lote registrado!"); time.sleep(1); st.rerun()
+
+# --- 📋 ABA: PADRÕES ---
+elif aba == "📋 Padrões":
+    st.title("📋 Histórico de Padrões Aprovados")
+    df_p = carregar_sql("padroes_registrados")
+    
+    if df_p.empty:
+        st.info("Nenhum padrão registrado ainda.")
+    else:
+        # Lógica de download
+        csv = df_p.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📥 Baixar Lista de Padrões (CSV)", data=csv, file_name="padroes_colortex.csv", mime="text/csv")
+        st.dataframe(df_p, use_container_width=True)
 
 # --- 📈 ABA: CONTROLE ---
 elif aba == "📈 Controle":
@@ -139,15 +174,12 @@ elif aba == "📈 Controle":
         df_plot = df_hist[(df_hist['tipo de produto'] == p_sel) & (df_hist['cor'] == c_sel)].copy()
         
         if not df_plot.empty:
-            # Cálculos (Dados já estão em gramas no banco)
             df_plot['Desvio (g)'] = df_plot['Quant ad (g)'] - df_plot['Quantidade OP']
             df_plot['Var %'] = ((df_plot['Quant ad (g)'] / df_plot['Quantidade OP'].replace(0, np.nan)) - 1) * 100
-            
-            # Lógica de Economia (Ok se for menor, Fora se for excesso > 10%)
+            # Regra: Fora apenas se excesso > 10%
             df_plot['Situação'] = df_plot.apply(lambda r: "⚠️ Fora" if r['Var %'] > 10 else "✅ Ok", axis=1)
             
             st.line_chart(df_plot.pivot_table(index='lote', columns='pigmento', values='Var %'))
-            st.write("**Detalhamento dos Lotes (Gramas):**")
             st.dataframe(df_plot[['data', 'lote', 'pigmento', 'Quantidade OP', 'Quant ad (g)', 'Desvio (g)', 'Var %', 'Situação']], use_container_width=True)
 
 # --- 📜 BANCO DE DADOS ---
@@ -181,13 +213,11 @@ elif aba == "📂 Importar CSV":
             df_imp = df_imp.drop(columns=['Quantidade OP'], errors='ignore')
             df_imp = pd.merge(df_imp, df_m_ref[['Tipo', 'Cor', 'Pigmento', 'Quant OP (kg)']], 
                               left_on=['tipo de produto', 'cor', 'pigmento'], right_on=['Tipo', 'Cor', 'Pigmento'], how='left')
-            
-            # Conversão para gramas no ato da importação
+            # Garante recálculo para gramas na importação
             df_imp['Quantidade OP'] = (df_imp['Quant OP (kg)'] * 1000) * (df_imp['#Plan'] * df_imp['Litros/Unit'])
-            df_imp = df_imp.drop(columns=['Tipo', 'Cor', 'Pigmento', 'Quant OP (kg)'], errors='ignore')
-
+        
         salvar_sql(df_imp, alvo, modo='append')
-        st.success("Dados importados e convertidos para gramas!"); time.sleep(1); st.rerun()
+        st.success("Importação concluída com sucesso!"); time.sleep(1); st.rerun()
 
     st.divider()
     if st.button("🔴 RESET TOTAL DO BANCO"):
