@@ -44,7 +44,6 @@ def carregar_sql(tabela):
 
 def salvar_sql(df, tabela, modo='replace'):
     conn = get_connection()
-    # Mapeamento de colunas para garantir integridade do banco
     cols_db = {
         "aba_mestra": ['Tipo', 'Cor', 'Pigmento', 'Quant OP (kg)'],
         "historico_producao": ['data', 'lote', 'tipo de produto', 'cor', 'pigmento', 'Quant ad (g)', 'Quantidade OP', '#Plan', '#Real', 'Litros/Unit'],
@@ -52,7 +51,6 @@ def salvar_sql(df, tabela, modo='replace'):
     }
     colunas_validas = cols_db.get(tabela, df.columns)
     df_save = df[[c for c in colunas_validas if c in df.columns]].copy()
-    
     df_save.to_sql(tabela, conn, if_exists=modo, index=False)
     conn.commit()
     conn.close()
@@ -74,9 +72,8 @@ aba = st.sidebar.radio("Navegação:", menu)
 if aba == "🚀 Registro":
     st.title("🚀 Registro de Pigmentação")
     df_mestra = carregar_sql("aba_mestra")
-    
     if df_mestra.empty:
-        st.warning("Aba Mestra vazia. Importe as fórmulas em 'Importar CSV'.")
+        st.warning("Aba Mestra vazia.")
     else:
         c1, c2, c3, c4 = st.columns([1.5, 1.5, 1, 1])
         t_sel = c1.selectbox("Produto", sorted(df_mestra['Tipo'].unique()))
@@ -87,27 +84,18 @@ if aba == "🚀 Registro":
         v1, v2, v3, v4 = st.columns([1, 1, 2, 1.5])
         n_p = v1.number_input("# Unid Plan", min_value=0.1, value=1.0)
         n_r = v2.number_input("# Unid Real", min_value=0.1, value=1.0)
-        
-        # Slider com as 12 opções solicitadas
         opcoes_emb = ["0,9L", "1,5kg", "3L", "3,6L", "5kg", "14L", "15L", "18kg", "20kg", "22kg", "25kg", "Outro"]
         sel_v = v3.select_slider("Embalagem:", options=opcoes_emb, value="15L")
-        
-        if sel_v == "Outro":
-            litros_u = v3.number_input("Valor Unitário:", min_value=0.1, value=1.0)
-        else:
-            litros_u = float(re.sub(r'[^\d.]', '', sel_v.replace(',','.')))
+        litros_u = v3.number_input("Valor Unitário:", min_value=0.1, value=1.0) if sel_v == "Outro" else float(re.sub(r'[^\d.]', '', sel_v.replace(',','.')))
 
         check_padrao = v4.checkbox("🌟 Definir como Novo Padrão")
-
         formula = df_mestra[(df_mestra['Tipo'] == t_sel) & (df_mestra['Cor'] == cor_sel)]
         st.divider()
 
         regs = []
         for i, row in formula.iterrows():
             coef = float(row['Quant OP (kg)'])
-            # OP calculada em gramas para o banco
             espec_g = round((coef * 1000) * (n_p * litros_u), 2)
-            
             with st.container():
                 col_i, col_p = st.columns([1.5, 3.5])
                 col_i.subheader(row['Pigmento']); col_i.write(f"Espec: {espec_g}g")
@@ -124,104 +112,98 @@ if aba == "🚀 Registro":
                 "cor": cor_sel, "pigmento": row['Pigmento'], "Quant ad (g)": s_ad,
                 "Quantidade OP": espec_g, "#Plan": n_p, "#Real": n_r, "Litros/Unit": litros_u
             })
-            st.divider()
 
         if st.button("💾 SALVAR LOTE"):
             if not lote_id: st.error("Lote obrigatório.")
             else:
-                df_atual = pd.DataFrame(regs)
-                salvar_sql(df_atual, "historico_producao", modo='append')
-                
+                salvar_sql(pd.DataFrame(regs), "historico_producao", modo='append')
                 if check_padrao:
-                    # Salva o registro do padrão
                     df_p = pd.DataFrame([{"Data": data_f.strftime("%d/%m/%Y"), "Produto": t_sel, "Cor": cor_sel, "Lote": lote_id, "Status": "Padrão"}])
                     salvar_sql(df_p, "padroes_registrados", modo='append')
-                    
-                    # Atualiza Aba Mestra (Retroalimentação g -> kg/L)
                     conn = get_connection()
                     for r in regs:
-                        novo_coef_kg = (r['Quant ad (g)'] / 1000) / (n_r * litros_u)
-                        conn.execute("UPDATE aba_mestra SET [Quant OP (kg)] = ? WHERE Tipo = ? AND Cor = ? AND Pigmento = ?",
-                                     (novo_coef_kg, t_sel, cor_sel, r['pigmento']))
-                    conn.commit()
-                    conn.close()
-                    st.warning("⚠️ Aba Mestra atualizada com o novo padrão!")
-
-                st.success("Lote registrado!"); time.sleep(1); st.rerun()
+                        novo_coef = (r['Quant ad (g)'] / 1000) / (n_r * litros_u)
+                        conn.execute("UPDATE aba_mestra SET [Quant OP (kg)] = ? WHERE Tipo = ? AND Cor = ? AND Pigmento = ?", (novo_coef, t_sel, cor_sel, r['pigmento']))
+                    conn.commit(); conn.close()
+                st.success("Lote salvo!"); time.sleep(1); st.rerun()
 
 # --- 📋 ABA: PADRÕES ---
 elif aba == "📋 Padrões":
-    st.title("📋 Histórico de Padrões Aprovados")
+    st.title("📋 Padrões Aprovados")
     df_p = carregar_sql("padroes_registrados")
-    
-    if df_p.empty:
-        st.info("Nenhum padrão registrado ainda.")
-    else:
-        # Lógica de download
+    if not df_p.empty:
+        c1, c2 = st.columns([3, 1])
         csv = df_p.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📥 Baixar Lista de Padrões (CSV)", data=csv, file_name="padroes_colortex.csv", mime="text/csv")
+        c1.download_button("📥 Baixar CSV", data=csv, file_name="padroes.csv")
+        
+        lote_del = c2.selectbox("Excluir Padrão do Lote:", ["Selecionar"] + list(df_p['Lote'].unique()))
+        if c2.button("🗑️ Confirmar Exclusão") and lote_del != "Selecionar":
+            conn = get_connection()
+            conn.execute("DELETE FROM padroes_registrados WHERE Lote = ?", (lote_del,))
+            conn.commit(); conn.close()
+            st.rerun()
         st.dataframe(df_p, use_container_width=True)
+    else: st.info("Nenhum padrão registrado.")
 
-# --- 📈 ABA: CONTROLE ---
+# --- 📜 BANCO DE DADOS (COM BUSCA E PROMOÇÃO A PADRÃO) ---
+elif aba == "📜 Banco de Dados":
+    st.title("📜 Histórico e Promoção a Padrão")
+    df_h = carregar_sql("historico_producao")
+    
+    col1, col2 = st.columns([2, 1])
+    lote_busca = col1.selectbox("Selecione um Lote para promover a Padrão:", [""] + list(df_h['lote'].unique()))
+    
+    if col2.button("🌟 Definir Lote como Padrão") and lote_busca != "":
+        lote_data = df_h[df_h['lote'] == lote_busca]
+        # Salva na tabela de padrões
+        df_p_new = pd.DataFrame([{"Data": lote_data.iloc[0]['data'], "Produto": lote_data.iloc[0]['tipo de produto'], "Cor": lote_data.iloc[0]['cor'], "Lote": lote_busca, "Status": "Padrão"}])
+        salvar_sql(df_p_new, "padroes_registrados", modo='append')
+        # Atualiza Aba Mestra
+        conn = get_connection()
+        for _, r in lote_data.iterrows():
+            novo_c = (r['Quant ad (g)'] / 1000) / (r['#Real'] * r['Litros/Unit'])
+            conn.execute("UPDATE aba_mestra SET [Quant OP (kg)] = ? WHERE Tipo = ? AND Cor = ? AND Pigmento = ?", (novo_c, r['tipo de produto'], r['cor'], r['pigmento']))
+        conn.commit(); conn.close()
+        st.success(f"Lote {lote_busca} agora é o padrão!"); time.sleep(1); st.rerun()
+
+    ed_h = st.data_editor(df_h, num_rows="dynamic", use_container_width=True)
+    if st.button("💾 Salvar Edições"): salvar_sql(ed_h, "historico_producao"); st.success("Salvo!")
+
+# --- 📈 CONTROLE ---
 elif aba == "📈 Controle":
-    st.title("📈 Dashboard de Qualidade (CEP)")
+    st.title("📈 Controle de Qualidade")
     df_hist = carregar_sql("historico_producao")
-    if df_hist.empty: st.info("Sem dados no banco.")
-    else:
+    if not df_hist.empty:
         c1, c2 = st.columns(2)
         p_sel = c1.selectbox("Produto", sorted(df_hist['tipo de produto'].unique()))
         c_sel = c2.selectbox("Cor", sorted(df_hist[df_hist['tipo de produto'] == p_sel]['cor'].unique()))
         df_plot = df_hist[(df_hist['tipo de produto'] == p_sel) & (df_hist['cor'] == c_sel)].copy()
-        
         if not df_plot.empty:
-            df_plot['Desvio (g)'] = df_plot['Quant ad (g)'] - df_plot['Quantidade OP']
             df_plot['Var %'] = ((df_plot['Quant ad (g)'] / df_plot['Quantidade OP'].replace(0, np.nan)) - 1) * 100
-            # Regra: Fora apenas se excesso > 10%
             df_plot['Situação'] = df_plot.apply(lambda r: "⚠️ Fora" if r['Var %'] > 10 else "✅ Ok", axis=1)
-            
             st.line_chart(df_plot.pivot_table(index='lote', columns='pigmento', values='Var %'))
-            st.dataframe(df_plot[['data', 'lote', 'pigmento', 'Quantidade OP', 'Quant ad (g)', 'Desvio (g)', 'Var %', 'Situação']], use_container_width=True)
-
-# --- 📜 BANCO DE DADOS ---
-elif aba == "📜 Banco de Dados":
-    st.title("📜 Gestão de Dados (SQLite)")
-    df_h = carregar_sql("historico_producao")
-    ed_h = st.data_editor(df_h, num_rows="dynamic", use_container_width=True)
-    if st.button("💾 Salvar Alterações"):
-        salvar_sql(ed_h, "historico_producao"); st.success("Atualizado!")
+            st.dataframe(df_plot[['data', 'lote', 'pigmento', 'Quantidade OP', 'Quant ad (g)', 'Var %', 'Situação']], use_container_width=True)
 
 # --- 📊 ABA MESTRA ---
 elif aba == "📊 Aba Mestra":
-    st.title("📊 Editor Aba Mestra (kg/L)")
+    st.title("📊 Aba Mestra (kg/L)")
     df_m = carregar_sql("aba_mestra")
     ed_m = st.data_editor(df_m, num_rows="dynamic", use_container_width=True)
-    if st.button("💾 Salvar Mestra"):
-        salvar_sql(ed_m, "aba_mestra"); st.success("Fórmulas Atualizadas!")
+    if st.button("💾 Salvar Mestra"): salvar_sql(ed_m, "aba_mestra"); st.success("Atualizado!")
 
 # --- 📂 IMPORTAR CSV ---
 elif aba == "📂 Importar CSV":
     st.title("📂 Importação Blindada")
-    up = st.file_uploader("Selecione o arquivo CSV", type="csv")
-    alvo = st.selectbox("Tabela Destino", ["aba_mestra", "historico_producao"])
-    
-    if up and st.button("🚀 Injetar no SQLite"):
+    up = st.file_uploader("Arquivo CSV", type="csv")
+    alvo = st.selectbox("Destino", ["aba_mestra", "historico_producao"])
+    if up and st.button("🚀 Importar"):
         df_imp = pd.read_csv(up, sep=None, engine='python', encoding='utf-8-sig')
-        df_imp.columns = [c.strip() for c in df_imp.columns]
-        
         if alvo == "historico_producao":
             df_m_ref = carregar_sql("aba_mestra")
             df_imp = df_imp.drop(columns=['Quantidade OP'], errors='ignore')
-            df_imp = pd.merge(df_imp, df_m_ref[['Tipo', 'Cor', 'Pigmento', 'Quant OP (kg)']], 
-                              left_on=['tipo de produto', 'cor', 'pigmento'], right_on=['Tipo', 'Cor', 'Pigmento'], how='left')
-            # Garante recálculo para gramas na importação
+            df_imp = pd.merge(df_imp, df_m_ref[['Tipo', 'Cor', 'Pigmento', 'Quant OP (kg)']], left_on=['tipo de produto', 'cor', 'pigmento'], right_on=['Tipo', 'Cor', 'Pigmento'], how='left')
             df_imp['Quantidade OP'] = (df_imp['Quant OP (kg)'] * 1000) * (df_imp['#Plan'] * df_imp['Litros/Unit'])
-        
-        salvar_sql(df_imp, alvo, modo='append')
-        st.success("Importação concluída com sucesso!"); time.sleep(1); st.rerun()
+        salvar_sql(df_imp, alvo, modo='append'); st.success("Importado!")
 
-    st.divider()
-    if st.button("🔴 RESET TOTAL DO BANCO"):
-        conn = get_connection(); conn.execute("DROP TABLE IF EXISTS aba_mestra")
-        conn.execute("DROP TABLE IF EXISTS historico_producao")
-        conn.execute("DROP TABLE IF EXISTS padroes_registrados")
-        conn.commit(); conn.close(); init_db(); st.warning("Banco reiniciado!"); st.rerun()
+    if st.button("🔴 RESET TOTAL"):
+        conn = get_connection(); conn.execute("DROP TABLE IF EXISTS aba_mestra"); conn.execute("DROP TABLE IF EXISTS historico_producao"); conn.execute("DROP TABLE IF EXISTS padroes_registrados"); conn.commit(); conn.close(); init_db(); st.rerun()
